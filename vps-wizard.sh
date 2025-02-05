@@ -19,6 +19,29 @@ if [[ "$OS_VERSION" -lt 10 ]]; then
     exit 1
 fi
 
+manage_services() {
+    while true; do
+        echo "\nOptions:"
+        echo "1) Check Engarde status"
+        echo "2) Restart Engarde"
+        echo "3) Check WireGuard status"
+        echo "4) Restart WireGuard"
+        echo "5) Remove Engarde and WireGuard"
+        echo "6) Exit"
+        read -rp "Select an option: " option
+
+        case $option in
+            1) systemctl status engarde ;;
+            2) systemctl restart engarde ;;
+            3) systemctl status wg-quick@wg0 ;;
+            4) systemctl restart wg-quick@wg0 ;;
+            5) rm -rf /etc/wireguard /usr/local/bin/engarde-server /etc/systemd/system/engarde.service && echo "Removed Engarde and WireGuard." ;;
+            6) exit 0 ;;
+            *) echo "Invalid choice." ;;
+        esac
+    done
+}
+
 # Check if Engarde is already installed
 if systemctl list-units --full -all | grep -q "engarde.service"; then
     echo "Engarde is already installed. Launching management menu..."
@@ -154,27 +177,6 @@ EOF
 
 install_engarde
 
-manage_services() {
-    while true; do
-        echo "\nOptions:"
-        echo "1) Check Engarde status"
-        echo "2) Restart Engarde"
-        echo "3) Check WireGuard status"
-        echo "4) Restart WireGuard"
-        echo "5) Remove Engarde and WireGuard"
-        echo "6) Exit"
-        read -rp "Select an option: " option
 
-        case $option in
-            1) systemctl status engarde ;;
-            2) systemctl restart engarde ;;
-            3) systemctl status wg-quick@wg0 ;;
-            4) systemctl restart wg-quick@wg0 ;;
-            5) rm -rf /etc/wireguard /usr/local/bin/engarde-server /etc/systemd/system/engarde.service && echo "Removed Engarde and WireGuard." ;;
-            6) exit 0 ;;
-            *) echo "Invalid choice." ;;
-        esac
-    done
-}
 
 manage_services
