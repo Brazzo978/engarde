@@ -68,6 +68,11 @@ install_wireguard() {
     CLIENT_PRIVATE_KEY=$(cat /etc/wireguard/client_private.key)
     CLIENT_PUBLIC_KEY=$(cat /etc/wireguard/client_public.key)
 
+    # Enable IP forwarding for IPv4 and IPv6
+    echo 'net.ipv4.ip_forward = 1' | tee -a /etc/sysctl.conf
+    echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.conf
+    sysctl -p /etc/sysctl.conf
+
     # Configure WireGuard Server
     cat > "$WIREGUARD_CONFIG" <<EOF
 [Interface]
@@ -105,7 +110,9 @@ EOF
 
     echo "WireGuard server is configured."
     echo "Client configuration saved at /root/wg-client.conf"
+    echo "IPv4 and IPv6 forwarding enabled."
 }
+
 
 install_wireguard
 
