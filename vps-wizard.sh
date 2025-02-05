@@ -59,7 +59,6 @@ while [[ ! $SERVER_PORT =~ ^[0-9]+$ ]]; do
     [[ $SERVER_PORT =~ ^[0-9]+$ ]] || echo "Invalid port. Please enter a valid port number."
 done
 
-# Install and configure WireGuard
 install_wireguard() {
     mkdir -p /etc/wireguard
     wg genkey | tee /etc/wireguard/server_private.key | wg pubkey > /etc/wireguard/server_public.key
@@ -69,6 +68,7 @@ install_wireguard() {
     CLIENT_PRIVATE_KEY=$(cat /etc/wireguard/client_private.key)
     CLIENT_PUBLIC_KEY=$(cat /etc/wireguard/client_public.key)
 
+    # Configure WireGuard Server
     cat > "$WIREGUARD_CONFIG" <<EOF
 [Interface]
 Address = $SERVER_WG_IPV4/24
@@ -83,8 +83,28 @@ AllowedIPs = 10.0.0.2/32
 EOF
 
     chmod 600 "$WIREGUARD_CONFIG"
+
+    # Configure WireGuard Client
+    cat > "/root/wg-client.conf" <<EOF
+[Interface]
+PrivateKey = $CLIENT_PRIVATE_KEY
+Address = 10.0.0.2/24
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = $(cat /etc/wireguard/server_public.key)
+Endpoint = $SERVER_PUB_IP:$SERVER_PORT
+AllowedIPs = 0.0.0.0/0,::/0
+PersistentKeepalive = 25
+EOF
+
+    chmod 600 "/root/wg-client.conf"
+
     systemctl enable wg-quick@wg0
     systemctl start wg-quick@wg0
+
+    echo "WireGuard server is configured."
+    echo "Client configuration saved at /root/wg-client.conf"
 }
 
 install_wireguard
