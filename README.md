@@ -35,7 +35,7 @@ You can find the latest Go builds here (thanks to linuxzogno.org for hosting the
 | *Darwin (Mac OS)* | [Download](https://engarde.linuxzogno.org/builds/master/darwin/i386/engarde-client) | [Download](https://engarde.linuxzogno.org/builds/master/darwin/amd64/engarde-client) |  |
 
 If you prefer, or if you need another architecture, you can always compile from source. Some more documentation about this will be available soon, but it shouldn't be too hard if you know a little about Golang.
- For the rust version they will be available on the release page once they are stable enough.
+## For the rust version they will be available on the release page once they are stable enough.
 ## How do i use it? 
 there is a script for automatic server setup and wip for client setup
 
