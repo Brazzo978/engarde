@@ -1,7 +1,8 @@
-# engarde - Don't lose that packet!
+# engarde - Don't lose that packet! Rust porting for better speed and performance 
 
 [Official Facebook page](https://www.facebook.com/engarde-Dont-lose-that-packet-110039227317920)
 
+[Official Go Version](https://github.com/porech/engarde)
 ## What is engarde?
 engarde is a network utility specifically designed to create a point-to-point tunnel over multiple network (typically Internet) connections, ensuring that the tunnel stays up and healty without a single delay or package loss, as long as at least one of the connections is working.
 
@@ -17,27 +18,14 @@ In some way, engarde is similar to a failover mechanism, but it doesn't switch t
 ## Wait... isn't this a terrible bandwidth waste?
 Absolutely yes. The used bandwidth is the one you would normally use multiplied by the number of the connections you have. But hey, imagine you are transmitting real time audio to a national radio station: would you really prefer that a connection failure causes some moments of silence to the listeners, or would you happily waste your bandwidth to avoid it?
 
-## How do I get it?
-You can find the latest Go builds here (thanks to linuxzogno.org for hosting them):
+## For the rust version they are available on the release page!
+Or if you want to compile them you can just download the project and build it , the angular project for the webui is the same as the one used on the go version because i have no idea on how to modify so i am providing a compiled version of the static binaries , for the code to build it yourself check (https://github.com/porech/engarde).
 
-### Server
-|                   | i386     | amd64    | arm    |
-| ----------------- | -------- | -------- | -------- |
-| *Linux*           | [Download](https://engarde.linuxzogno.org/builds/master/linux/i386/engarde-server) | [Download](https://engarde.linuxzogno.org/builds/master/linux/amd64/engarde-server) | [Download](https://engarde.linuxzogno.org/builds/master/linux/arm/engarde-server) |
-| *Windows*         | [Download](https://engarde.linuxzogno.org/builds/master/windows/i386/engarde-server.exe) | [Download](https://engarde.linuxzogno.org/builds/master/windows/amd64/engarde-server.exe) |  |
-| *Darwin (Mac OS)* | [Download](https://engarde.linuxzogno.org/builds/master/darwin/i386/engarde-server) | [Download](https://engarde.linuxzogno.org/builds/master/darwin/amd64/engarde-server) |  |
-
-### Client
-|                   | i386     | amd64    | arm    |
-| ----------------- | -------- | -------- | -------- |
-| *Linux*           | [Download](https://engarde.linuxzogno.org/builds/master/linux/i386/engarde-client) | [Download](https://engarde.linuxzogno.org/builds/master/linux/amd64/engarde-client) | [Download](https://engarde.linuxzogno.org/builds/master/linux/arm/engarde-client) |
-| *Windows*         | [Download](https://engarde.linuxzogno.org/builds/master/windows/i386/engarde-client.exe) | [Download](https://engarde.linuxzogno.org/builds/master/windows/amd64/engarde-client.exe) |  |
-| *Darwin (Mac OS)* | [Download](https://engarde.linuxzogno.org/builds/master/darwin/i386/engarde-client) | [Download](https://engarde.linuxzogno.org/builds/master/darwin/amd64/engarde-client) |  |
-
-If you prefer, or if you need another architecture, you can always compile from source. Some more documentation about this will be available soon, but it shouldn't be too hard if you know a little about Golang.
-## For the rust version they will be available on the release page once they are stable enough.
 ## How do i use it? 
-there is a script for automatic server setup and wip for client setup
+there is a script for automatic server setup and there will be one for client setup.
+
+### SETUP GUIDE WIP
+Here there will be a super awesome guide on how to get start soon or yeah...
 
 ## How can I check if everything is working?
 There is an Angular web interface embedded in both the client and the server. Please have a look to the comments in the [example config file](https://github.com/porech/engarde/blob/master/engarde.yml.sample) for more information about how to enable it.
@@ -58,31 +46,8 @@ After doing this, you'll be able to run engarde-client as a normal user.
 ## Can I ask for help?
 Of course! Feel free to open an issue for any necessity ;)
 
-## I love it, can I offer you a coffee?
-Wow, thanks! You can drop some Bitcoin to 39fBEZvKvxf2aZUBWWV1PuoKwCUvk6VWLg
-
-## Are you still developing it? (aka: project status)
-To answer this question, I will rapidly start with why I wrote engarde.
-
-I cooperate with a radio station, and sometimes we need to transmit from out-of-the-world locations with a reasonable latency. We use little bandwidth (a 64kbps OPUS stream is enough in a difficult situation), but of course we need the connection not to drop or listeners are not happy. We mainly rely on 4G connections, that work like a charm most of the time but sometimes they get down. So, we have a bunch of them from different carriers and we use engarde to reach our central server. Sometimes, additional connections pop up, even in the middle of a live session: a wifi offered by a gentleman who lives there, or something like that.
-
-That's an easy setup: one client, one server and many connections. As it is now, engarde perfectly fits this use case.
-
-So, I'm still ensuring that engarde compiles and works correctly, as I use it myself, but I'm not really motivated into further improving it because I don't need anything more from it. Not a good way of thinking as an open source project mantainer, I know, but I started new projects such as having a baby and some social life, and they're quite time-consuming.
-
-I think engarde has a lot of potential in other fields, and those are the things I would do if I had time (from the simpler to the harder):
-1. Re-organize all code that I wrote years ago when I didn't know how to do that, it's quite a mess
-2. Have a single executable for both client and server, and let the configuration decide what to start as
-3. Allow to have a single instance host multiple configurations, instead of having to start a process for each client on the server
-4. Avoid overlaying Wireguard but use an userspace implementation of Wireguard that directly creates the VPN. This would probably allow to differentiate the connecting clients and avoid using a separate port for each client
-5. Make it a software and not a hack: something that can be installed with a package and configured easily. I look at the Tailscale setup and usage experience and I see what I'd love engarde to be
-
-I'll probably never make all of this, but if you think engarde deserves some care and are willing to contribute, this is what I think is useful to do. I'd love it!
-
-## License
-
-### Source code
-The whole source code is released under the terms of the GNU General Public License (GPL) v2. You can find a copy of the license in the LICENSE.txt file.  
+## All credits to https://github.com/porech
+For having the idea building the project and making a fully working software , this is just a port to get faster speed for gamers out there
 
 ### Logo
 The engarde logo is based on the Go gopher. The Go gopher was designed by Renee French. (http://reneefrench.blogspot.com/)
