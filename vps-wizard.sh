@@ -1,6 +1,7 @@
 #!/bin/bash
 
-ENGARDE_URL="https://engarde.linuxzogno.org/builds/master/linux/amd64/engarde-server"
+ENGARDE_GO_URL="https://engarde.linuxzogno.org/builds/master/linux/amd64/engarde-server"
+ENGARDE_RUST_URL="https://github.com/Brazzo978/engarde/releases/download/0.0.1/engarde_server"
 ENGARDE_BIN="/usr/local/bin/engarde-server"
 ENGARDE_CONFIG="/etc/engarde.yml"
 WIREGUARD_CONFIG="/etc/wireguard/wg0.conf"
@@ -18,6 +19,16 @@ if [[ "$OS_VERSION" -lt 10 ]]; then
     echo "Error: This script requires Debian 10 or higher."
     exit 1
 fi
+
+# Ask user for Engarde version
+while true; do
+    read -rp "Which version of Engarde do you want to install? (1 = Go [Stable], 2 = Rust [Performance]): " ENGARDE_VERSION
+    case $ENGARDE_VERSION in
+        1) ENGARDE_URL=$ENGARDE_GO_URL; break ;;
+        2) ENGARDE_URL=$ENGARDE_RUST_URL; break ;;
+        *) echo "Invalid choice. Please enter 1 or 2." ;;
+    esac
+done
 
 manage_services() {
     while true; do
