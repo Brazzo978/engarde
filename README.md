@@ -24,7 +24,7 @@ Or if you want to compile them you can just download the project and build it , 
 ## How do i use it? 
 there is a script for automatic server setup and there will be one for client setup.
 
-### SETUP GUIDE WIP
+### [SETUP GUIDE WIP](Docs/Setup.md)
 Here there will be a super awesome guide on how to get start soon or yeah...
 
 ## How can I check if everything is working?
