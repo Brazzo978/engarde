@@ -22,7 +22,6 @@ Absolutely yes. The used bandwidth is the one you would normally use multiplied 
 Or if you want to compile them you can just download the project and build it , the angular project for the webui is the same as the one used on the go version because i have no idea on how to modify so i am providing a compiled version of the static binaries , for the code to build it yourself check (https://github.com/porech/engarde).
 
 ## How do i use it? 
-there is a script for automatic server setup and there will be one for client setup.
 
 ### [SETUP GUIDE WIP](Docs/Setup.md)
 
