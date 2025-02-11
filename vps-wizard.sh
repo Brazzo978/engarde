@@ -39,6 +39,8 @@ manage_services() {
         echo "4) Restart WireGuard"
         echo "5) Remove Engarde and WireGuard"
         echo "6) Exit"
+        echo "7) Activate port forwarding"
+        echo "8) Deactivate port forwarding"
         read -rp "Select an option: " option
 
         case $option in
@@ -46,8 +48,10 @@ manage_services() {
             2) systemctl restart engarde ;;
             3) systemctl status wg-quick@wg0 ;;
             4) systemctl restart wg-quick@wg0 ;;
-            5) rm -rf /etc/wireguard /usr/local/bin/engarde-server /etc/systemd/system/engarde.service && echo "Engarde and WireGuard have been removed." ;;
+            5) rm -rf /etc/wireguard /usr/local/bin/engarde-server /etc/systemd/system/engarde.service && echo "Engarde and WireGuard removed." ;;
             6) exit 0 ;;
+            7) activate_port_forwarding ;;
+            8) deactivate_port_forwarding ;;
             *) echo "Invalid choice." ;;
         esac
     done
@@ -64,7 +68,7 @@ fi
 apt update
 apt install -y wireguard iproute2 wget iptables
 
-# Detect public IPv4 address and public network interface
+# Detect public IPv4 address and public interface
 SERVER_PUB_IP=$(ip -4 addr | sed -ne 's|^.* inet \([^/]*\)/.* scope global.*$|\1|p' | awk '{print $1}' | head -1)
 SERVER_NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
 
@@ -86,6 +90,9 @@ while [[ ! $SERVER_WG_IPV4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; do
     [[ $SERVER_WG_IPV4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || echo "Invalid IPv4 address. Please enter a valid IPv4 address."
 done
 
+# Set the VPN client IPv4 (used in client config and port forwarding)
+CLIENT_WG_IPV4="10.0.0.2"
+
 # Set the WireGuard server port in the range 65500-65535, excluding 65522 (reserved for SSH)
 while [[ ! $SERVER_PORT =~ ^[0-9]+$ ]] || [[ $SERVER_PORT -lt 65500 || $SERVER_PORT -gt 65535 || $SERVER_PORT -eq 65522 ]]; do
     read -rp "WireGuard server port (65500-65535, excluding 65522): " -e -i "65500" SERVER_PORT
@@ -93,6 +100,14 @@ while [[ ! $SERVER_PORT =~ ^[0-9]+$ ]] || [[ $SERVER_PORT -lt 65500 || $SERVER_P
         echo "Invalid port. It must be between 65500 and 65535 and cannot be 65522."
     fi
 done
+
+# Define default iptables rules for WireGuard (used in PostUp/PostDown)
+DEFAULT_POSTUP="iptables -A FORWARD -i $SERVER_NIC -o $SERVER_WG_NIC -j ACCEPT; iptables -A FORWARD -i $SERVER_WG_NIC -j ACCEPT; iptables -t nat -A POSTROUTING -o $SERVER_NIC -j MASQUERADE"
+DEFAULT_POSTDOWN="iptables -D FORWARD -i $SERVER_NIC -o $SERVER_WG_NIC -j ACCEPT; iptables -D FORWARD -i $SERVER_WG_NIC -j ACCEPT; iptables -t nat -D POSTROUTING -o $SERVER_NIC -j MASQUERADE"
+
+# Define port forwarding rules to forward UDP and TCP ports 1–65499 to the VPN client
+PORTFORWARD_POSTUP="iptables -t nat -A PREROUTING -i $SERVER_NIC -p udp --dport 1:65499 -j DNAT --to-destination $CLIENT_WG_IPV4:1-65499; iptables -t nat -A PREROUTING -i $SERVER_NIC -p tcp --dport 1:65499 -j DNAT --to-destination $CLIENT_WG_IPV4:1-65499"
+PORTFORWARD_POSTDOWN="iptables -t nat -D PREROUTING -i $SERVER_NIC -p udp --dport 1:65499 -j DNAT --to-destination $CLIENT_WG_IPV4:1-65499; iptables -t nat -D PREROUTING -i $SERVER_NIC -p tcp --dport 1:65499 -j DNAT --to-destination $CLIENT_WG_IPV4:1-65499"
 
 install_wireguard() {
     mkdir -p /etc/wireguard
@@ -108,27 +123,27 @@ install_wireguard() {
     echo 'net.ipv6.conf.all.forwarding = 1' | tee -a /etc/sysctl.conf
     sysctl -p /etc/sysctl.conf
 
-    # Configure WireGuard Server
+    # Configure WireGuard Server using the default (no port forwarding) rules
     cat > "$WIREGUARD_CONFIG" <<EOF
 [Interface]
 Address = $SERVER_WG_IPV4/24
 ListenPort = $SERVER_PORT
 PrivateKey = $SERVER_PRIVATE_KEY
-PostUp = iptables -A FORWARD -i $SERVER_NIC -o $SERVER_WG_NIC -j ACCEPT; iptables -A FORWARD -i $SERVER_WG_NIC -j ACCEPT; iptables -t nat -A POSTROUTING -o $SERVER_NIC -j MASQUERADE
-PostDown = iptables -D FORWARD -i $SERVER_NIC -o $SERVER_WG_NIC -j ACCEPT; iptables -D FORWARD -i $SERVER_WG_NIC -j ACCEPT; iptables -t nat -D POSTROUTING -o $SERVER_NIC -j MASQUERADE
+PostUp = $DEFAULT_POSTUP
+PostDown = $DEFAULT_POSTDOWN
 
 [Peer]
 PublicKey = $CLIENT_PUBLIC_KEY
-AllowedIPs = 10.0.0.2/32
+AllowedIPs = $CLIENT_WG_IPV4/32
 EOF
 
     chmod 600 "$WIREGUARD_CONFIG"
 
     # Configure WireGuard Client
-    cat > "/root/wg-client.conf" <<EOF
+    cat > "$CLIENT_CONFIG" <<EOF
 [Interface]
 PrivateKey = $CLIENT_PRIVATE_KEY
-Address = 10.0.0.2/24
+Address = $CLIENT_WG_IPV4/24
 DNS = 1.1.1.1
 
 [Peer]
@@ -138,17 +153,15 @@ AllowedIPs = 0.0.0.0/0,::/0
 PersistentKeepalive = 25
 EOF
 
-    chmod 600 "/root/wg-client.conf"
+    chmod 600 "$CLIENT_CONFIG"
 
     systemctl enable wg-quick@wg0
     systemctl start wg-quick@wg0
 
     echo "WireGuard server configured on port $SERVER_PORT."
-    echo "Client configuration saved at /root/wg-client.conf"
+    echo "Client configuration saved at $CLIENT_CONFIG."
     echo "IPv4 and IPv6 forwarding enabled."
 }
-
-install_wireguard
 
 install_engarde() {
     wget -O "$ENGARDE_BIN" "$ENGARDE_URL"
@@ -157,7 +170,7 @@ install_engarde() {
     cat > "$ENGARDE_CONFIG" <<EOF
 server:
   description: "Engarde Server Instance"
-  # Engarde listens on port 65501 (within the range 65500-65535)
+  # Engarde listens on port 65501 (within range 65500-65535)
   listenAddr: "0.0.0.0:65501"
   # Forward traffic to WireGuard running on port $SERVER_PORT
   dstAddr: "127.0.0.1:$SERVER_PORT"
@@ -189,22 +202,43 @@ EOF
     systemctl start engarde
 }
 
+# Function to activate port forwarding by appending extra iptables rules to PostUp/PostDown
+activate_port_forwarding() {
+    # Check if port forwarding is already active (marker "#PF")
+    if grep -q "#PF" "$WIREGUARD_CONFIG"; then
+        echo "Port forwarding is already activated."
+        return
+    fi
+    sed -i "s|^PostUp = $DEFAULT_POSTUP|PostUp = $DEFAULT_POSTUP; $PORTFORWARD_POSTUP #PF|" "$WIREGUARD_CONFIG"
+    sed -i "s|^PostDown = $DEFAULT_POSTDOWN|PostDown = $DEFAULT_POSTDOWN; $PORTFORWARD_POSTDOWN #PF|" "$WIREGUARD_CONFIG"
+    echo "Port forwarding activated. Please restart the WireGuard service (wg-quick@wg0) to apply changes."
+}
+
+# Function to deactivate port forwarding by removing the extra iptables rules
+deactivate_port_forwarding() {
+    if ! grep -q "#PF" "$WIREGUARD_CONFIG"; then
+        echo "Port forwarding is not active."
+        return
+    fi
+    sed -i "s|; $PORTFORWARD_POSTUP #PF||" "$WIREGUARD_CONFIG"
+    sed -i "s|; $PORTFORWARD_POSTDOWN #PF||" "$WIREGUARD_CONFIG"
+    echo "Port forwarding deactivated. Please restart the WireGuard service (wg-quick@wg0) to apply changes."
+}
+
+install_wireguard
 install_engarde
 
 # Change SSH port from 22 to 65522 if necessary
 CURRENT_SSH_PORT=$(grep -E '^\s*Port\s+' /etc/ssh/sshd_config | awk '{print $2}' | head -1)
 if [[ -z $CURRENT_SSH_PORT ]]; then
-    # If no Port directive is found, assume default port 22
     CURRENT_SSH_PORT=22
 fi
 
 if [[ $CURRENT_SSH_PORT -ne 65522 ]]; then
     read -p "Warning! SSH port will be changed from $CURRENT_SSH_PORT to 65522. Proceed? (y/n): " confirm
     if [[ $confirm == [yY] ]]; then
-        # Replace both commented and uncommented Port lines
         sed -i -E 's/^\s*#?\s*Port\s+[0-9]+/Port 65522/' /etc/ssh/sshd_config
         echo "SSH port changed to 65522."
-        # Restart the SSH service (tries both service names)
         systemctl restart ssh || systemctl restart sshd
     else
         echo "SSH port change cancelled."
