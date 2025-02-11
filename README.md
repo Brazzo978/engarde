@@ -24,7 +24,7 @@ Or if you want to compile them you can just download the project and build it , 
 ## How do i use it? 
 there is a script for automatic server setup and there will be one for client setup.
 
-# [SETUP GUIDE WIP](Docs/Setup.md)
+### [SETUP GUIDE WIP](Docs/Setup.md)
 
 ## How can I check if everything is working?
 There is an Angular web interface embedded in both the client and the server. Please have a look to the comments in the [example config file](https://github.com/porech/engarde/blob/master/engarde.yml.sample) for more information about how to enable it.
