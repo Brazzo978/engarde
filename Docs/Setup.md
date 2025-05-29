@@ -17,9 +17,113 @@ then it will ask the user for the wireguard tunnel subnet , defaulting to 10.0.0
 
 and lastly it will ask for the wireguard server port , you can leave 51820 since its gona be used only by engarde in this case.
 
-You should find in the root of the system the wireguard config for the client.
+You should find in the root of the system a file named client_config.sh , we will need this file on the client before setup so copy it locally and upload to the root directory of the client before running the client installation script.
 
 
 
 ## Client Setup 
-There will be sometimes a client setup helper script too.
+Before running the Client setup helper you are gona need some things , all the interface that are gona be used need to be with static ip .
+
+You need to create 1 routing table foreach additional connection you want to use with engarde , so edit /etc/iproute2/rt_tables and add them , Example :
+
+nano /etc/iproute2/rt_tables  and add the needed routing table from >
+
+```bash
+#
+# reserved values
+#
+255     local
+254     main
+253     default
+0       unspec
+#
+# local
+#
+#1 
+```
+to > 
+
+```bash
+#
+# reserved values
+#
+255     local
+254     main
+253     default
+0       unspec
+100 wan1
+200 wan2
+XXX wanX
+#
+# local
+#
+#1 
+```
+
+Then on your interface configuration you need to put each interface in the corrisponding table 
+we do this by editing the /etc/network/interface file this way , FROM > 
+```bash
+
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+# The primary WAN
+allow-hotplug ens33
+iface ens33 inet static
+        address 10.10.10.188/24
+        gateway 10.10.10.1
+        dns-nameserver 1.1.1.1
+
+# The Secondary WAN
+allow-hotplug ens36
+iface ens36 inet static
+        address 192.168.182.80
+        netmask 255.255.255.0
+        gateway 192.168.107.1
+```
+
+To This adding all the part for associating an interface to its own routing table ( you can copy the rules and put your own address and interface ) > 
+
+```bash
+# This file describes the network interfaces available on your system
+# and how to activate them. For more information, see interfaces(5).
+
+source /etc/network/interfaces.d/*
+
+# The loopback network interface
+auto lo
+iface lo inet loopback
+
+# The primary network interface
+allow-hotplug ens33
+iface ens33 inet static
+        address 10.10.10.188/24
+        gateway 10.10.10.1
+        dns-nameserver 1.1.1.1
+
+
+allow-hotplug ens36
+iface ens36 inet static
+        address 192.168.1.80
+
+    up ip route add 192.168.1.0/24 dev ens36 src 192.168.1.80 table wan2
+    up ip route add default via 192.168.1.1 dev ens36 table wan2
+    up ip rule add from 192.168.1.80/32 table wan2
+    up ip rule add to 192.168.1.1/32 table wan2
+
+```
+This is how the rule should be adapted: 
+```bash
+
+up ip route add "INSERTWANSUBNET/SUBNETMASK" dev "INSERTWANINTERFACENAME" src "INSERTINTERFACEIP" table "INSERTCORRESPONDINGROUTINGTABLE"
+    up ip route add default via "INSERTWANGATEWAY" dev "INSERTWANINTERFACENAME" table "INSERTCORRESPONDINGROUTINGTABLE"
+    up ip rule add from "INSERTINTERFACEIP/32" table "INSERTCORRESPONDINGROUTINGTABLE"
+    up ip rule add to "INSERTWANGATEWAY/32" table "INSERTCORRESPONDINGROUTINGTABLE"
+
+```
