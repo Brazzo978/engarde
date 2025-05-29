@@ -119,24 +119,6 @@ enforce_ssh_port() {
   systemctl restart sshd
 }
 
-#-------------------------------------------------------------------------------
-# Port forwarding toggle (in engarde.yml)
-activate_pf() {
-  sed -i "/webManager:/i\  postUpExtra: 'iptables -t nat -A PREROUTING -i $(ip route show default | awk '/default/{print $5}') -p tcp --dport 1:65499 -j DNAT --to-destination ${CLIENT_WG_IP%%/*}:1-65499; iptables -t nat -A PREROUTING -i $(ip route show default | awk '/default/{print $5}') -p udp --dport 1:65499 -j DNAT --to-destination ${CLIENT_WG_IP%%/*}:1-65499'" "$ENGARDE_CFG"
-}
-deactivate_pf() {
-  sed -i "/postUpExtra/d" "$ENGARDE_CFG"
-}
-
-toggle_pf() {
-  read -rp "Activate or deactivate port forwarding? (a/d): " ch
-  case "$ch" in
-    a) activate_pf; echo "Port forwarding activated.";;
-    d) deactivate_pf; echo "Port forwarding deactivated.";;
-    *) echo "Invalid choice.";;
-  esac
-}
-
 
 #-------------------------------------------------------------------------------
 # Client config generation (shell)
@@ -246,7 +228,6 @@ done
 enable_wireguard
 install_engarde_server
 enforce_ssh_port
-activate_pf
 touch "$FLAG_FILE"
 generate_client_sh
 
