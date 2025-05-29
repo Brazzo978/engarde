@@ -57,14 +57,14 @@ cat > /etc/engarde.yml <<EOF
 client:
   description: "$ENG_DESC"
   listenAddr: "$ENG_LISTEN"
-  dstAddr: "$SERVER_ENDPOINT"
+  dstAddr: "$ENG_DST"
   writeTimeout: 10
   excludedInterfaces:
     - "wg0"
     - "lo"
   dstOverrides: []
   webManager:
-    listenAddr: "0.0.0.0:$ENG_GUI_PORT"
+    listenAddr: "0.0.0.0:9001"
     username: "$ENG_USER"
     password: "$ENG_PASS"
 EOF
@@ -98,7 +98,8 @@ DNS         = $DNS_SERVER
 
 [Peer]
 PublicKey  = $SERVER_WG_PUB
-Endpoint   = $SERVER_ENDPOINT
+# WireGuard deve puntare al client Engarde in locale
+Endpoint   = 127.0.0.1:${ENG_LISTEN##*:}
 AllowedIPs = 0.0.0.0/0,::/0
 EOF
   chmod 600 /etc/wireguard/wg0.conf
