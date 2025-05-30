@@ -98,9 +98,8 @@ DNS         = $DNS_SERVER
 
 [Peer]
 PublicKey  = $SERVER_WG_PUB
-# WireGuard deve puntare al client Engarde in locale
 Endpoint   = 127.0.0.1:${ENG_LISTEN##*:}
-AllowedIPs = 0.0.0.0/0,::/0
+AllowedIPs = 0.0.0.0/1,128.0.0.0/1
 EOF
   chmod 600 /etc/wireguard/wg0.conf
   systemctl enable wg-quick@wg0
