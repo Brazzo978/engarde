@@ -159,3 +159,16 @@ echo "net.core.wmem_default=33554432" >> /etc/sysctl.conf
 echo "net.core.rmem_max=33554432" >> /etc/sysctl.conf
 echo "net.core.rmem_default=33554432" >> /etc/sysctl.conf
 ```
+You might also try changing the txqueuelen for the wireguard interface and/or on the wan interfaces 
+
+```bash
+ip link set wg0 txqueuelen 10000
+
+ip link set "interfacenamehere" txqueuelen 10000
+```
+or to make it permanent you can add this in the /etc/network/interface file 
+
+```bash
+pre-up ip link set "interfacenamehere" txqueuelen 10000
+
+```
