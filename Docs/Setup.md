@@ -17,6 +17,16 @@ then it will ask the user for the wireguard tunnel subnet , defaulting to 10.0.0
 
 and lastly it will ask for the wireguard server port , you can leave 51820 since its gona be used only by engarde in this case.
 
+Once installed if rerun the script will present to you a menù with the following options: 
+      1) Show the status of Engarde service
+      2) Restart Engarde service
+      3) Show wireguard service status 
+      4) Restart Wireguard service
+      5) toggle port forwarding to Client
+      6) Regenerate client config file
+      7) Removes everything the script did from the system 
+      8) exit from the menù
+
 You should find in the root of the system a file named client_config.sh , we will need this file on the client before setup so copy it locally and upload to the root directory of the client before running the client installation script.
 
 
