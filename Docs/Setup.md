@@ -18,6 +18,7 @@ then it will ask the user for the wireguard tunnel subnet , defaulting to 10.0.0
 and lastly it will ask for the wireguard server port , you can leave 51820 since its gona be used only by engarde in this case.
 
 Once installed if rerun the script will present to you a menù with the following options: 
+
       1) Show the status of Engarde service
       2) Restart Engarde service
       3) Show wireguard service status 
