@@ -340,16 +340,25 @@ async fn receive_from_wireguard(
             *wg_addr_lock = Some(src_addr);
         }
         let channels_snapshot = sending_channels.lock().unwrap().clone();
-        for (ifname, routine) in channels_snapshot {
-            let send_future = routine.src_sock.send_to(&buf[..n], routine.dst_addr);
-            match time::timeout(write_timeout, send_future).await {
-                Ok(Ok(_)) => {},
+        let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
+            let src_sock = routine.src_sock.clone();
+            let dst_addr = routine.dst_addr;
+            let data = buf[..n].to_vec();
+            async move {
+                let fut = src_sock.send_to(&data, dst_addr);
+                (ifname, tokio::time::timeout(write_timeout, fut).await)
+            }
+        });
+        let results = futures::future::join_all(sends).await;
+        for (ifname, result) in results {
+            match result {
+                Ok(Ok(_)) => {}
                 Ok(Err(e)) => {
                     warn!("Error writing to {}: {}", ifname, e);
-                },
+                }
                 Err(_) => {
                     warn!("Timeout writing to {}", ifname);
-                },
+                }
             }
         }
     }
