@@ -177,6 +177,33 @@ uninstall_all() {
   exit 0
 }
 
+toggle_pf() {
+  WG_CFG="/etc/wireguard/wg0.conf"
+  IFACE=$(ip route show default | awk '/default/{print $5}')
+  TCP_RULE="iptables -t nat -A PREROUTING -i $IFACE -p tcp --dport 1:65499 -j DNAT --to-destination 10.0.0.2"
+  UDP_RULE="iptables -t nat -A PREROUTING -i $IFACE -p udp --dport 1:65499 -j DNAT --to-destination 10.0.0.2"
+
+  # Controllo se è già presente la riga TCP (basta controllarne una)
+  if grep -Fq "$TCP_RULE" "$WG_CFG"; then
+    echo "Rimuovo regole DNAT da wg0.conf..."
+    # Rimuovo entrambe le righe
+    sed -i "\|$TCP_RULE|d" "$WG_CFG"
+    sed -i "\|$UDP_RULE|d" "$WG_CFG"
+    echo "Regole DNAT rimosse."
+  else
+    echo "Aggiungo regole DNAT a wg0.conf..."
+    # Inserisco le due righe subito dopo la riga [Interface]
+    sed -i "/^\[Interface\]/a PostUp = $TCP_RULE\nPostUp = $UDP_RULE\nPostDown = iptables -t nat -D PREROUTING -i $IFACE -p tcp --dport 1:65499 -j DNAT --to-destination 10.0.0.2\nPostDown = iptables -t nat -D PREROUTING -i $IFACE -p udp --dport 1:65499 -j DNAT --to-destination 10.0.0.2" "$WG_CFG"
+    echo "Regole DNAT aggiunte."
+  fi
+
+  # Riavvio WireGuard per applicare le modifiche
+  echo "Riavvio wg-quick@wg0..."
+  systemctl restart wg-quick@wg0
+  echo "Fatto."
+}
+
+
 #-------------------------------------------------------------------------------
 # Management menu
 manage() {
