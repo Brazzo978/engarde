@@ -148,10 +148,22 @@ async fn receive_from_wireguard(
                         .collect::<Vec<_>>()
                 };
 
-                for (key, client) in clients_snapshot {
-                    if now.duration_since(client.last) < client_timeout {
-                        let send_fut = client_socket.send_to(&buf[..n], client.addr);
-                        match tokio::time::timeout(write_timeout, send_fut).await {
+                let sends = clients_snapshot.into_iter().map(|(key, client)| {
+                    let socket = client_socket.clone();
+                    let addr = client.addr;
+                    let alive = now.duration_since(client.last) < client_timeout;
+                    let data = buf[..n].to_vec();
+                    async move {
+                        let send_fut = socket.send_to(&data, addr);
+                        (key, alive, tokio::time::timeout(write_timeout, send_fut).await)
+                    }
+                });
+
+                let results = futures::future::join_all(sends).await;
+
+                for (key, still_valid, result) in results {
+                    if still_valid {
+                        match result {
                             Ok(Ok(_)) => {}
                             Ok(Err(e)) => {
                                 log::warn!("Errore scrivendo al client {}: {}", key, e);
