@@ -3,13 +3,64 @@
 set -euo pipefail
 trap 'echo "[ERROR] Line $LINENO exited with status $?" >&2' ERR
 
+#-----------------------------------------------------------------------
+# Service helpers (defined early so they are available for any checks)
+status_wg() { systemctl status wg-quick@wg0; }
+status_engarde() { systemctl status engarde-client; }
+restart_wg() { echo "Riavvio WireGuard..."; systemctl restart wg-quick@wg0; }
+restart_engarde() { echo "Riavvio Engarde-client..."; systemctl restart engarde-client; }
+uninstall_all() {
+  echo "== Disinstallazione ed cleanup =="
+  systemctl stop engarde-client wg-quick@wg0 || true
+  systemctl disable engarde-client wg-quick@wg0 || true
+  rm -f /etc/systemd/system/engarde-client.service
+  rm -f /usr/local/bin/engarde-client
+  rm -rf /etc/wireguard /etc/engarde-client
+  rm -f "$FLAG"
+  systemctl daemon-reload
+  echo "Disinstallazione completata."
+  exit 0
+}
+
+manage() {
+  while true; do
+    echo -e "\n== Gestione Client =="
+    echo "1) Stato WireGuard"
+    echo "2) Stato Engarde-client"
+    echo "3) Riavvia WireGuard"
+    echo "4) Riavvia Engarde-client"
+    echo "5) Disinstalla tutto"
+    echo "0) Esci"
+    read -rp "Opzione: " opt
+    case $opt in
+      1) status_wg;;
+      2) status_engarde;;
+      3) restart_wg;;
+      4) restart_engarde;;
+      5) uninstall_all;;
+      0) exit 0;;
+      *) echo "Scelta non valida.";;
+    esac
+  done
+}
+
 #-------------------------------------------------------------------------------
 # Ensure root privileges
 [[ $(id -u) -eq 0 ]] || { echo "Devi essere root." >&2; exit 1; }
 
 #-------------------------------------------------------------------------------
-# Install dependencies if missing
+# Check existing installation
 FLAG="/etc/engarde-client/installed.flag"
+if systemctl is-enabled --quiet engarde-client \
+  && systemctl is-enabled --quiet wg-quick@wg0 \
+  && [[ -f "$FLAG" ]]; then
+  echo "Installazione già rilevata, apro il menù di gestione."
+  manage
+  exit 0
+fi
+
+#-------------------------------------------------------------------------------
+# Install dependencies if missing
 if [[ -f "$FLAG" ]]; then
   echo "Config già presente, salto installazione dipendenze."
 else
@@ -106,48 +157,9 @@ EOF
   systemctl start wg-quick@wg0
 fi
 
-#-------------------------------------------------------------------------------
-# Service commands
-status_wg() { systemctl status wg-quick@wg0; }
-status_engarde() { systemctl status engarde-client; }
-restart_wg() { echo "Riavvio WireGuard..."; systemctl restart wg-quick@wg0; }
-restart_engarde() { echo "Riavvio Engarde-client..."; systemctl restart engarde-client; }
-uninstall_all() {
-  echo "== Disinstallazione ed cleanup =="
-  systemctl stop engarde-client wg-quick@wg0 || true
-  systemctl disable engarde-client wg-quick@wg0 || true
-  rm -f /etc/systemd/system/engarde-client.service
-  rm -f /usr/local/bin/engarde-client
-  rm -rf /etc/wireguard /etc/engarde-client
-  rm -f "$FLAG"
-  systemctl daemon-reload
-  echo "Disinstallazione completata."
-  exit 0
-}
-
-#-------------------------------------------------------------------------------
-# Interactive management menu
-manage() {
-  while true; do
-    echo -e "\n== Gestione Client =="
-    echo "1) Stato WireGuard"
-    echo "2) Stato Engarde-client"
-    echo "3) Riavvia WireGuard"
-    echo "4) Riavvia Engarde-client"
-    echo "5) Disinstalla tutto"
-    echo "0) Esci"
-    read -rp "Opzione: " opt
-    case $opt in
-      1) status_wg;;
-      2) status_engarde;;
-      3) restart_wg;;
-      4) restart_engarde;;
-      5) uninstall_all;;
-      0) exit 0;;
-      *) echo "Scelta non valida.";;
-    esac
-  done
-}
+# Mark installation complete
+mkdir -p /etc/engarde-client
+touch "$FLAG"
 
 #-------------------------------------------------------------------------------
 echo "Pronto per gestire client."
