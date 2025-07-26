@@ -30,7 +30,7 @@ jobs:
           cross build --release --target ${{ matrix.target }} --manifest-path Rust/${{ matrix.crate }}/Cargo.toml
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.crate }}-${{ matrix.target }}
           path: target/${{ matrix.target }}/release/engarde_server
