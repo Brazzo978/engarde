@@ -85,6 +85,7 @@ server:
   description: "Engarde Server Instance"
   listenAddr: "0.0.0.0:$PORT_ENGARDE"
   dstAddr:    "127.0.0.1:$PORT_WG"
+  mode: "$ENG_MODE"
   clientTimeout: 30
   writeTimeout: 10
   webManager:
@@ -141,6 +142,7 @@ DNS_SERVER='1.1.1.1'
 ENG_DESC='client-$(hostname)'
 ENG_LISTEN='127.0.0.1:59401'
 ENG_DST='${PUB_IP}:${PORT_ENGARDE}'
+ENG_MODE='udp'
 ENG_USER='engarde'
 ENG_PASS='engarde'
 EOF

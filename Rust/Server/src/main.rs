@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-use tokio::{net::UdpSocket, task};
+use tokio::{net::{UdpSocket, TcpListener, tcp::{OwnedReadHalf, OwnedWriteHalf}}, io::{AsyncReadExt, AsyncWriteExt}, task};
 
 use serde::Deserialize;
 
@@ -20,6 +20,17 @@ struct Config {
     server: ServerConfig,
 }
 
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Mode {
+    Udp,
+    Tcp,
+}
+
+impl Default for Mode {
+    fn default() -> Self { Mode::Udp }
+}
+
 #[derive(Debug, Deserialize)]
 struct ServerConfig {
     description: Option<String>,
@@ -30,6 +41,8 @@ struct ServerConfig {
     // in secondi
     clientTimeout: Option<u64>,
     webManager: Option<WebManagerConfig>,
+    #[serde(default, rename = "mode")]
+    mode: Mode,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +60,8 @@ struct WebManagerConfig {
 struct ConnectedClient {
     addr: SocketAddr,
     last: Instant,
+    #[allow(dead_code)]
+    writer: Option<Arc<tokio::sync::Mutex<OwnedWriteHalf>>>,
 }
 
 type Clients = Arc<Mutex<HashMap<String, ConnectedClient>>>;
@@ -194,6 +209,76 @@ async fn receive_from_wireguard(
     }
 }
 
+async fn receive_from_wireguard_tcp(
+    wg_socket: Arc<UdpSocket>,
+    clients: Clients,
+    wg_addr: SocketAddr,
+    client_timeout: Duration,
+    write_timeout: Duration,
+) {
+    let mut buf = vec![0u8; 1500];
+    loop {
+        match wg_socket.recv_from(&mut buf).await {
+            Ok((n, _)) => {
+                let now = Instant::now();
+                let snapshot = {
+                    let guard = clients.lock().unwrap();
+                    guard.iter().map(|(k,v)| (k.clone(), v.clone())).collect::<Vec<_>>()
+                };
+                let mut to_remove = Vec::new();
+                for (key, client) in snapshot {
+                    if now.duration_since(client.last) >= client_timeout {
+                        to_remove.push(key);
+                        continue;
+                    }
+                    if let Some(writer) = &client.writer {
+                        let data = buf[..n].to_vec();
+                        let writer = writer.clone();
+                        let res = tokio::time::timeout(write_timeout, async {
+                            let mut w = writer.lock().await;
+                            w.write_all(&(data.len() as u16).to_be_bytes()).await?;
+                            w.write_all(&data).await
+                        }).await;
+                        match res {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(e)) => { log::warn!("Errore scrivendo al client {}: {}", key, e); to_remove.push(key); }
+                            Err(_) => { log::warn!("Timeout scrivendo al client {}", key); to_remove.push(key); }
+                        }
+                    }
+                }
+                if !to_remove.is_empty() {
+                    let mut guard = clients.lock().unwrap();
+                    for k in to_remove { guard.remove(&k); }
+                }
+            }
+            Err(e) => { log::warn!("Errore in recv_from Wireguard: {}", e); }
+        }
+    }
+}
+
+async fn handle_client_tcp_read(
+    mut reader: OwnedReadHalf,
+    clients: Clients,
+    key: String,
+    wg_socket: Arc<UdpSocket>,
+    wg_addr: SocketAddr,
+) {
+    let mut buf = vec![0u8; 1500];
+    loop {
+        let mut len_buf = [0u8;2];
+        if let Err(e) = reader.read_exact(&mut len_buf).await { log::warn!("Errore lettura len da {}: {}", key, e); break; }
+        let len = u16::from_be_bytes(len_buf) as usize;
+        if len > buf.len() { buf.resize(len,0); }
+        if let Err(e) = reader.read_exact(&mut buf[..len]).await { log::warn!("Errore lettura dati da {}: {}", key, e); break; }
+        {
+            let mut guard = clients.lock().unwrap();
+            if let Some(c) = guard.get_mut(&key) { c.last = Instant::now(); }
+        }
+        if let Err(e) = wg_socket.send_to(&buf[..len], &wg_addr).await { log::warn!("Errore inoltrando a Wireguard: {}", e); }
+    }
+    clients.lock().unwrap().remove(&key);
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::init();
@@ -213,15 +298,6 @@ async fn main() {
 
     let clients: Clients = Arc::new(Mutex::new(HashMap::new()));
 
-    // Socket UDP per i client
-    let client_socket = Arc::new(
-        UdpSocket::bind(&server.listenAddr)
-            .await
-            .unwrap_or_else(|e| panic!("Errore bind client socket: {}", e)),
-    );
-    log::info!("Listening on {}", server.listenAddr);
-
-    // Socket UDP per Wireguard (bind su "0.0.0.0:0")
     let wg_socket = Arc::new(
         UdpSocket::bind("0.0.0.0:0")
             .await
@@ -229,49 +305,104 @@ async fn main() {
     );
     let wg_addr: SocketAddr = server.dstAddr.parse().expect("Invalid dstAddr");
 
-    // Avvia task: ricezione da Wireguard
-    {
-        let clients = clients.clone();
-        let client_socket = client_socket.clone();
-        let wg_socket = wg_socket.clone();
-        tokio::spawn(async move {
-            receive_from_wireguard(
-                wg_socket,
-                client_socket,
-                wg_addr,
-                clients,
-                client_timeout,
-                write_timeout,
-            )
-            .await;
-        });
-    }
+    match server.mode {
+        Mode::Udp => {
+            let client_socket = Arc::new(
+                UdpSocket::bind(&server.listenAddr)
+                    .await
+                    .unwrap_or_else(|e| panic!("Errore bind client socket: {}", e)),
+            );
+            log::info!("Listening on {}", server.listenAddr);
 
-    // Avvia il webserver se configurato
-    if let Some(web_conf) = server.webManager {
-        let clients_web = clients.clone();
-        tokio::spawn(async move {
-            run_webserver(web_conf, clients_web).await;
-        });
-    }
+            {
+                let clients = clients.clone();
+                let client_socket = client_socket.clone();
+                let wg_socket = wg_socket.clone();
+                tokio::spawn(async move {
+                    receive_from_wireguard(
+                        wg_socket,
+                        client_socket,
+                        wg_addr,
+                        clients,
+                        client_timeout,
+                        write_timeout,
+                    )
+                    .await;
+                });
+            }
 
-    // Loop principale: ricezione dai client e inoltro a Wireguard
-    let mut buf = vec![0u8; 1500];
-    loop {
-        match client_socket.recv_from(&mut buf).await {
-            Ok((n, src_addr)) => {
-                let key = src_addr.to_string();
-                let now = Instant::now();
-                {
-                    let mut map = clients.lock().unwrap();
-                    map.insert(key.clone(), ConnectedClient { addr: src_addr, last: now });
-                }
-                if let Err(e) = wg_socket.send_to(&buf[..n], &wg_addr).await {
-                    log::warn!("Errore inoltrando a Wireguard: {}", e);
+            if let Some(web_conf) = server.webManager {
+                let clients_web = clients.clone();
+                tokio::spawn(async move {
+                    run_webserver(web_conf, clients_web).await;
+                });
+            }
+
+            let mut buf = vec![0u8; 1500];
+            loop {
+                match client_socket.recv_from(&mut buf).await {
+                    Ok((n, src_addr)) => {
+                        let key = src_addr.to_string();
+                        let now = Instant::now();
+                        {
+                            let mut map = clients.lock().unwrap();
+                            map.insert(key.clone(), ConnectedClient { addr: src_addr, last: now, writer: None });
+                        }
+                        if let Err(e) = wg_socket.send_to(&buf[..n], &wg_addr).await {
+                            log::warn!("Errore inoltrando a Wireguard: {}", e);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Errore in recv_from client: {}", e);
+                    }
                 }
             }
-            Err(e) => {
-                log::warn!("Errore in recv_from client: {}", e);
+        }
+        Mode::Tcp => {
+            let listener = TcpListener::bind(&server.listenAddr)
+                .await
+                .unwrap_or_else(|e| panic!("Errore bind tcp listener: {}", e));
+            log::info!("Listening (TCP) on {}", server.listenAddr);
+
+            {
+                let clients = clients.clone();
+                let wg_socket = wg_socket.clone();
+                tokio::spawn(async move {
+                    receive_from_wireguard_tcp(
+                        wg_socket,
+                        clients,
+                        wg_addr,
+                        client_timeout,
+                        write_timeout,
+                    )
+                    .await;
+                });
+            }
+
+            if let Some(web_conf) = server.webManager {
+                let clients_web = clients.clone();
+                tokio::spawn(async move {
+                    run_webserver(web_conf, clients_web).await;
+                });
+            }
+
+            loop {
+                match listener.accept().await {
+                    Ok((stream, addr)) => {
+                        let key = addr.to_string();
+                        let (read_half, write_half) = stream.into_split();
+                        {
+                            let mut map = clients.lock().unwrap();
+                            map.insert(key.clone(), ConnectedClient { addr, last: Instant::now(), writer: Some(Arc::new(tokio::sync::Mutex::new(write_half))) });
+                        }
+                        let clients_clone = clients.clone();
+                        let wg_socket_clone = wg_socket.clone();
+                        tokio::spawn(async move {
+                            handle_client_tcp_read(read_half, clients_clone, key, wg_socket_clone, wg_addr).await;
+                        });
+                    }
+                    Err(e) => log::warn!("Errore accept: {}", e),
+                }
             }
         }
     }

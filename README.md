@@ -21,6 +21,10 @@ Absolutely yes. The used bandwidth is the one you would normally use multiplied 
 ## For the rust version they are available on the release page!
 Or if you want to compile them you can just download the project and build it , the angular project for the webui is the same as the one used on the go version because i have no idea on how to modify so i am providing a compiled version of the static binaries , for the code to build it yourself check (https://github.com/porech/engarde).
 
+## UDP or TCP mode
+By default engarde uses UDP sockets between client and server. To force TCP simply set `mode: tcp` in the relevant
+`client` or `server` configuration section. Leaving the option unset, or `mode: udp`, retains the original behaviour.
+
 ## How do i use it? 
 
 ### [SETUP GUIDE WIP](Docs/Setup.md)

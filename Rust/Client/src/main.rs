@@ -7,8 +7,8 @@ use std::{
 
 use if_addrs::get_if_addrs;
 use serde::{Deserialize, Serialize};
-use tokio::{net::UdpSocket, time};
-use tokio::sync::RwLock;
+use tokio::{net::{UdpSocket, TcpSocket, TcpStream}, io::{AsyncReadExt, AsyncWriteExt}, time};
+use tokio::sync::{RwLock, Mutex as AsyncMutex};
 use warp::Filter;
 use log::{info, warn};
 use rust_embed::RustEmbed;
@@ -21,6 +21,19 @@ use mime_guess;
 #[derive(Debug, Deserialize, Clone)]
 struct Config {
     client: ClientConfig,
+}
+
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Mode {
+    Udp,
+    Tcp,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::Udp
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -39,6 +52,8 @@ struct ClientConfig {
     dst_overrides: Vec<DstOverride>,
     #[serde(rename = "webManager")]
     web_manager: Option<WebManagerConfig>,
+    #[serde(default, rename = "mode")]
+    mode: Mode,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -61,9 +76,16 @@ struct WebManagerConfig {
 // SENDING ROUTINE (per ogni interfaccia)
 //
 
+
+#[derive(Clone)]
+enum Channel {
+    Udp(Arc<UdpSocket>),
+    Tcp(Arc<tokio::sync::Mutex<tokio::net::tcp::OwnedWriteHalf>>),
+}
+
 #[derive(Clone)]
 struct SendingRoutine {
-    src_sock: Arc<UdpSocket>,
+    channel: Channel,
     src_addr: String,
     dst_addr: SocketAddr,
     last_rec: Arc<Mutex<Instant>>,
@@ -72,6 +94,21 @@ struct SendingRoutine {
 }
 
 type SendingChannels = Arc<Mutex<HashMap<String, SendingRoutine>>>;
+
+impl SendingRoutine {
+    async fn send(&self, data: &[u8]) -> std::io::Result<()> {
+        match &self.channel {
+            Channel::Udp(sock) => {
+                sock.send_to(data, self.dst_addr).await.map(|_| ())
+            }
+            Channel::Tcp(writer) => {
+                let mut w = writer.lock().await;
+                w.write_all(&(data.len() as u16).to_be_bytes()).await?;
+                w.write_all(data).await
+            }
+        }
+    }
+}
 
 //
 // Strutture per la Web API
@@ -208,6 +245,28 @@ async fn create_udp_socket(source_addr: &str) -> Option<Arc<UdpSocket>> {
     }
 }
 
+async fn create_tcp_connection(source_addr: &str, dst_addr: SocketAddr) -> Option<TcpStream> {
+    let src_ip: std::net::IpAddr = match source_addr.parse() {
+        Ok(ip) => ip,
+        Err(_) => return None,
+    };
+    let socket = match src_ip {
+        std::net::IpAddr::V4(_) => TcpSocket::new_v4().ok()?,
+        std::net::IpAddr::V6(_) => TcpSocket::new_v6().ok()?,
+    };
+    let bind_addr = SocketAddr::new(src_ip, 0);
+    if socket.bind(bind_addr).is_err() {
+        return None;
+    }
+    match socket.connect(dst_addr).await {
+        Ok(stream) => Some(stream),
+        Err(e) => {
+            warn!("Cannot connect to {} from {}: {}", dst_addr, source_addr, e);
+            None
+        }
+    }
+}
+
 //
 // Routine per ciascuna interfaccia
 //
@@ -228,48 +287,102 @@ async fn create_send_thread(
             return;
         }
     };
-    let src_sock = match create_udp_socket(source_addr).await {
-        Some(s) => s,
-        None => return,
-    };
-    let routine = SendingRoutine {
-        src_sock: src_sock.clone(),
-        src_addr: source_addr.to_string(),
-        dst_addr,
-        last_rec: Arc::new(Mutex::new(Instant::now())),
-        is_closing: Arc::new(Mutex::new(false)),
-    };
-    let routine_clone = routine.clone();
-    let ifname_owned = ifname.to_string();
-    tokio::spawn(async move {
-        wg_write_back(&ifname_owned, routine_clone, wg_sock, wg_addr).await;
-    });
-    sending_channels.lock().unwrap().insert(ifname.to_string(), routine);
+    match cfg.mode {
+        Mode::Udp => {
+            let src_sock = match create_udp_socket(source_addr).await {
+                Some(s) => s,
+                None => return,
+            };
+            let last_rec = Arc::new(Mutex::new(Instant::now()));
+            let routine = SendingRoutine {
+                channel: Channel::Udp(src_sock.clone()),
+                src_addr: source_addr.to_string(),
+                dst_addr,
+                last_rec: last_rec.clone(),
+                is_closing: Arc::new(Mutex::new(false)),
+            };
+            let ifname_owned = ifname.to_string();
+            tokio::spawn(async move {
+                wg_write_back_udp(&ifname_owned, src_sock, last_rec, wg_sock, wg_addr).await;
+            });
+            sending_channels.lock().unwrap().insert(ifname.to_string(), routine);
+        }
+        Mode::Tcp => {
+            let stream = match create_tcp_connection(source_addr, dst_addr).await {
+                Some(s) => s,
+                None => return,
+            };
+            let (read_half, write_half) = stream.into_split();
+            let writer = Arc::new(AsyncMutex::new(write_half));
+            let last_rec = Arc::new(Mutex::new(Instant::now()));
+            let routine = SendingRoutine {
+                channel: Channel::Tcp(writer.clone()),
+                src_addr: source_addr.to_string(),
+                dst_addr,
+                last_rec: last_rec.clone(),
+                is_closing: Arc::new(Mutex::new(false)),
+            };
+            let ifname_owned = ifname.to_string();
+            tokio::spawn(async move {
+                wg_write_back_tcp(&ifname_owned, read_half, last_rec, wg_sock, wg_addr).await;
+            });
+            sending_channels.lock().unwrap().insert(ifname.to_string(), routine);
+        }
+    }
 }
 
-async fn wg_write_back(
+async fn wg_write_back_udp(
     ifname: &str,
-    routine: SendingRoutine,
+    src_sock: Arc<UdpSocket>,
+    last_rec: Arc<Mutex<Instant>>,
     wg_sock: Arc<UdpSocket>,
     wg_addr: Arc<RwLock<Option<SocketAddr>>>,
 ) {
     let mut buf = vec![0u8; 1500];
     loop {
-        let n = match routine.src_sock.recv(&mut buf).await {
+        let n = match src_sock.recv(&mut buf).await {
             Ok(n) => n,
             Err(e) => {
                 warn!("Error reading from interface {}: {}", ifname, e);
                 break;
             }
         };
-        *routine.last_rec.lock().unwrap() = Instant::now();
+        *last_rec.lock().unwrap() = Instant::now();
         if let Some(addr) = *wg_addr.read().await {
             if let Err(e) = wg_sock.send_to(&buf[..n], addr).await {
                 warn!("Error writing to WireGuard: {}", e);
             }
         }
     }
-    // Qui potresti rimuovere la routine dalla mappa se necessario
+}
+
+async fn wg_write_back_tcp(
+    ifname: &str,
+    mut reader: tokio::net::tcp::OwnedReadHalf,
+    last_rec: Arc<Mutex<Instant>>,
+    wg_sock: Arc<UdpSocket>,
+    wg_addr: Arc<RwLock<Option<SocketAddr>>>,
+) {
+    let mut buf = vec![0u8; 1500];
+    loop {
+        let mut len_buf = [0u8;2];
+        if let Err(e) = reader.read_exact(&mut len_buf).await {
+            warn!("Error reading len from {}: {}", ifname, e);
+            break;
+        }
+        let len = u16::from_be_bytes(len_buf) as usize;
+        if len > buf.len() { buf.resize(len, 0); }
+        if let Err(e) = reader.read_exact(&mut buf[..len]).await {
+            warn!("Error reading data from {}: {}", ifname, e);
+            break;
+        }
+        *last_rec.lock().unwrap() = Instant::now();
+        if let Some(addr) = *wg_addr.read().await {
+            if let Err(e) = wg_sock.send_to(&buf[..len], addr).await {
+                warn!("Error writing to WireGuard: {}", e);
+            }
+        }
+    }
 }
 
 async fn update_available_interfaces(
@@ -340,16 +453,15 @@ async fn receive_from_wireguard(
             *wg_addr_lock = Some(src_addr);
         }
         let channels_snapshot = sending_channels.lock().unwrap().clone();
-        let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
-            let src_sock = routine.src_sock.clone();
-            let dst_addr = routine.dst_addr;
+        let mut tasks = Vec::new();
+        for (ifname, routine) in channels_snapshot.into_iter() {
             let data = buf[..n].to_vec();
-            async move {
-                let fut = src_sock.send_to(&data, dst_addr);
-                (ifname, tokio::time::timeout(write_timeout, fut).await)
-            }
-        });
-        let results = futures::future::join_all(sends).await;
+            tasks.push(async move {
+                let res = tokio::time::timeout(write_timeout, routine.send(&data)).await;
+                (ifname, res)
+            });
+        }
+        let results = futures::future::join_all(tasks).await;
         for (ifname, result) in results {
             match result {
                 Ok(Ok(_)) => {}
@@ -492,7 +604,7 @@ fn with_client_config(
 
 async fn run_webserver(
     listen_addr: &str,
-    web_cfg: WebManagerConfig,
+    _web_cfg: WebManagerConfig,
     sending_channels: SendingChannels,
     cfg: ClientConfig,
 ) {
