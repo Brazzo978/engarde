@@ -1,0 +1,4 @@
+config config 'Setup'
+    option enabled '0'
+    option pass ''
+    option dstAddr ''
