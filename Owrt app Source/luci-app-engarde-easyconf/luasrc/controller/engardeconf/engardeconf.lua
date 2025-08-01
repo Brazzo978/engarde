@@ -24,6 +24,6 @@ end
 
 function engardelog()
     local logfile = fs.readfile("/tmp/engarde.log") or ""
-    template.render("tinyvpnconf/file_viewer",
+    template.render("engardeconf/file_viewer",
         {title = i18n.translate("Service Script Log"), content = logfile})
 end
