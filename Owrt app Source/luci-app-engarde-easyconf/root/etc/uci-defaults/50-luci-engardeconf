@@ -9,6 +9,7 @@ uci -q batch <<-EOF >/dev/null
     set engardeconf.Setup=config
     set engardeconf.Setup.enabled='0'
     set engardeconf.Setup.pass=''
+    set engardeconf.Setup.username='engarde'
     set engardeconf.Setup.dstAddr=''
     commit engardeconf
 EOF
