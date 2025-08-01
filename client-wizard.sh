@@ -78,6 +78,7 @@ if [[ ! -f "$CONFIG_SCRIPT" ]]; then
 fi
 source "$CONFIG_SCRIPT"
 ENG_GUI_PORT=${ENG_LISTEN##*:}
+ENG_MODE="udp"
 
 #-------------------------------------------------------------------------------
 # Install Engarde-client binary (one-time)
@@ -109,6 +110,7 @@ client:
   description: "$ENG_DESC"
   listenAddr: "$ENG_LISTEN"
   dstAddr: "$ENG_DST"
+  mode: "$ENG_MODE"
   writeTimeout: 10
   excludedInterfaces:
     - "wg0"

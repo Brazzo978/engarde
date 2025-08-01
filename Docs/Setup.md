@@ -139,10 +139,11 @@ up ip route add "INSERTWANSUBNET/SUBNETMASK" dev "INSERTWANINTERFACENAME" src "I
 
 ```
 
-Tips: 
+Tips:
 for optimize speed with connection with really different bandwidth (Ex link1=50MB/s link2=400MB/s)
 You can try changing  "writeTimeout: 10" inside the /etc/engarde.yml file , that is the time engarde waits for all the connection to send out a packet before proceeding with the next one , lower value means less time is wasted waiting for lower link to send the packet higher value provides better link stability , default is 10ms.
-You can change the default debian write and read buffers , in my case the default was 208KB i got the best result with 32MB , you can use that command to set 4MB as default 
+To use TCP instead of UDP you can add `mode: tcp` under the `client` or `server` section of `/etc/engarde.yml`.
+You can change the default debian write and read buffers , in my case the default was 208KB i got the best result with 32MB , you can use that command to set 4MB as default
 
 ```bash
 echo "net.core.rmem_default=4194304" >> /etc/sysctl.conf
