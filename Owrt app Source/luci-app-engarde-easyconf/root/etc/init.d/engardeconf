@@ -1,0 +1,43 @@
+#!/bin/sh /etc/rc.common
+# Engarde client init script
+
+START=95
+USE_PROCD=1
+PROG=/usr/bin/engarde-client
+CFGFILE=/etc/engarde.yml
+LOGFILE=/tmp/engarde.log
+
+start_service() {
+    echo "Starting engarde" >$LOGFILE
+    config_load engardeconf
+    config_get_bool enabled Setup enabled 0
+    [ "$enabled" = "1" ] || { echo "Engarde disabled" >>$LOGFILE; return 1; }
+    config_get pass Setup pass
+    config_get dstAddr Setup dstAddr
+    mkdir -p /etc
+    cat >$CFGFILE <<EOC
+client:
+  description: "openwrt-client"
+  listenAddr: "127.0.0.1:59401"
+  dstAddr: "${dstAddr}:65531"
+  writeTimeout: 10
+  excludedInterfaces:
+    - "wg0"
+    - "lo"
+  dstOverrides: []
+  webManager:
+    listenAddr: "0.0.0.0:9001"
+    username: "engarde"
+    password: "${pass}"
+EOC
+    procd_open_instance
+    procd_set_param command $PROG $CFGFILE
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param respawn
+    procd_close_instance
+}
+
+stop_service() {
+    echo "Stopping engarde" >>$LOGFILE
+}

@@ -1,10 +1,16 @@
 #!/bin/sh
 
 uci -q batch <<-EOF >/dev/null
-	delete ucitrack.@engardeconf[-1]
-	add ucitrack engardeconf
+    delete ucitrack.@engardeconf[-1]
+    add ucitrack engardeconf
     set ucitrack.@engardeconf[-1].init=engardeconf
-	commit ucitrack
+    commit ucitrack
+    delete engardeconf.Setup
+    set engardeconf.Setup=config
+    set engardeconf.Setup.enabled='0'
+    set engardeconf.Setup.pass=''
+    set engardeconf.Setup.dstAddr=''
+    commit engardeconf
 EOF
 
 exit 0
