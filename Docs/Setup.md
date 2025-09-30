@@ -159,7 +159,18 @@ echo "net.core.wmem_default=33554432" >> /etc/sysctl.conf
 echo "net.core.rmem_max=33554432" >> /etc/sysctl.conf
 echo "net.core.rmem_default=33554432" >> /etc/sysctl.conf
 ```
-You might also try changing the txqueuelen for the wireguard interface and/or on the wan interfaces 
+
+### Nuovi algoritmi di aggregazione
+
+Nel file `/etc/engarde.yml` (o in quello che preferisci utilizzare) è stata aggiunta la chiave `aggregationAlgorithm` per decidere come distribuire i pacchetti sulle WAN disponibili:
+
+* `1` – comportamento storico: ogni pacchetto viene replicato su tutte le connessioni.
+* `2` – aggregazione pura con **weighted round robin**. Il peso predefinito è `1.0` per ogni interfaccia; il file dei pesi viene creato automaticamente accanto alla configurazione (`engarde.weights.yml`). Puoi modificarlo manualmente (formato YAML `nome_interfaccia: peso`) per preferire un link rispetto ad un altro.
+* `3` – modalità ibrida (WIP al momento, verrà documentata in futuro).
+
+> Suggerimento: se vuoi spostare il file dei pesi in un percorso personalizzato puoi usare l'opzione `weightsFile` nel blocco `client`.
+
+You might also try changing the txqueuelen for the wireguard interface and/or on the wan interfaces
 
 ```bash
 ip link set wg0 txqueuelen 10000

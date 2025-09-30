@@ -21,9 +21,26 @@ Absolutely yes. The used bandwidth is the one you would normally use multiplied 
 ## For the rust version they are available on the release page!
 Or if you want to compile them you can just download the project and build it , the angular project for the webui is the same as the one used on the go version because i have no idea on how to modify so i am providing a compiled version of the static binaries , for the code to build it yourself check (https://github.com/porech/engarde).
 
-## How do i use it? 
+## How do i use it?
 
 ### [SETUP GUIDE WIP](Docs/Setup.md)
+
+## Aggregation algorithms
+
+Engarde now supports multiple aggregation strategies that can be selected from the client configuration (`aggregationAlgorithm`).
+
+1. **Mirror all (default)** – each packet coming from WireGuard is sent through every available WAN, exactly like the historical behaviour. This maximises resiliency at the cost of bandwidth.
+2. **Pure aggregation (weighted round robin)** – packets are distributed across the active WANs according to the weights defined in the weight file. Each interface starts with weight `1.0` and the file can be edited manually to bias the traffic towards specific links.
+3. **Hybrid mode** – WIP. The documentation (and implementation) will be completed in a future iteration.
+
+The weight file defaults to `<config-name>.weights.yml` in the same directory as `engarde.yml` (for example `/etc/engarde.weights.yml`). The format is a simple YAML mapping:
+
+```yaml
+eth0: 2.5
+wwan0: 1.0
+```
+
+Whenever a new interface is detected, Engarde automatically ensures it exists inside the weight file with the default `1.0` value.
 
 ## How can I check if everything is working?
 There is an Angular web interface embedded in both the client and the server. Please have a look to the comments in the [example config file](https://github.com/porech/engarde/blob/master/engarde.yml.sample) for more information about how to enable it.
