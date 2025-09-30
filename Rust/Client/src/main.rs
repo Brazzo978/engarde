@@ -1,18 +1,23 @@
 use std::{
     collections::HashMap,
+    fs, io,
     net::SocketAddr,
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant, SystemTime},
 };
 
 use if_addrs::get_if_addrs;
-use serde::{Deserialize, Serialize};
-use tokio::{net::UdpSocket, time};
-use tokio::sync::RwLock;
-use warp::Filter;
 use log::{info, warn};
-use rust_embed::RustEmbed;
 use mime_guess;
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tokio::{net::UdpSocket, time};
+use warp::Filter;
 
 //
 // CONFIGURAZIONE
@@ -37,6 +42,10 @@ struct ClientConfig {
     excluded_interfaces: Vec<String>,
     #[serde(rename = "dstOverrides")]
     dst_overrides: Vec<DstOverride>,
+    #[serde(rename = "aggregationAlgorithm")]
+    aggregation_algorithm: Option<u8>,
+    #[serde(rename = "weightsFile")]
+    weights_file: Option<String>,
     #[serde(rename = "webManager")]
     web_manager: Option<WebManagerConfig>,
 }
@@ -55,6 +64,241 @@ struct WebManagerConfig {
     listen_addr: String,
     username: String,
     password: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AggregationAlgorithm {
+    MirrorAll,
+    WeightedRoundRobin,
+    Hybrid,
+}
+
+impl AggregationAlgorithm {
+    fn from_config(value: Option<u8>) -> Self {
+        match value.unwrap_or(1) {
+            1 => AggregationAlgorithm::MirrorAll,
+            2 => AggregationAlgorithm::WeightedRoundRobin,
+            3 => AggregationAlgorithm::Hybrid,
+            other => {
+                warn!(
+                    "Unknown aggregationAlgorithm value {}. Falling back to mirror-all mode.",
+                    other
+                );
+                AggregationAlgorithm::MirrorAll
+            }
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            AggregationAlgorithm::MirrorAll => "mirror-all",
+            AggregationAlgorithm::WeightedRoundRobin => "weighted-round-robin",
+            AggregationAlgorithm::Hybrid => "hybrid",
+        }
+    }
+}
+
+static HYBRID_WARNING_EMITTED: AtomicBool = AtomicBool::new(false);
+
+struct WeightManager {
+    path: PathBuf,
+    weights: HashMap<String, f64>,
+    version: u64,
+    last_modified: Option<SystemTime>,
+}
+
+impl WeightManager {
+    fn new(path: PathBuf) -> Self {
+        let mut manager = WeightManager {
+            path,
+            weights: HashMap::new(),
+            version: 0,
+            last_modified: None,
+        };
+        manager.reload_if_needed();
+        manager
+    }
+
+    fn reload_if_needed(&mut self) {
+        match fs::metadata(&self.path) {
+            Ok(metadata) => {
+                let modified = metadata.modified().ok();
+                if self.last_modified.is_some() && self.last_modified == modified {
+                    return;
+                }
+                match fs::read_to_string(&self.path) {
+                    Ok(contents) => {
+                        let parsed: Result<HashMap<String, f64>, _> = if contents.trim().is_empty()
+                        {
+                            Ok(HashMap::new())
+                        } else {
+                            serde_yaml::from_str(&contents)
+                        };
+                        match parsed {
+                            Ok(map) => {
+                                self.weights = map;
+                                self.last_modified = modified;
+                                self.version = self.version.wrapping_add(1);
+                            }
+                            Err(err) => {
+                                warn!("Cannot parse weights file {}: {}", self.path.display(), err);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn!("Cannot read weights file {}: {}", self.path.display(), err);
+                    }
+                }
+            }
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {
+                self.weights.clear();
+                self.last_modified = None;
+            }
+            Err(err) => {
+                warn!(
+                    "Cannot access weights file {}: {}",
+                    self.path.display(),
+                    err
+                );
+            }
+        }
+    }
+
+    fn ensure_interfaces(&mut self, interfaces: &[String]) {
+        self.reload_if_needed();
+        let mut changed = false;
+        for name in interfaces {
+            if !self.weights.contains_key(name) {
+                self.weights.insert(name.clone(), 1.0);
+                changed = true;
+                info!(
+                    "Initialized weight 1.0 for interface '{}' in {}",
+                    name,
+                    self.path.display()
+                );
+            }
+        }
+        if changed {
+            if let Err(err) = self.save_internal() {
+                warn!("Cannot persist weights to {}: {}", self.path.display(), err);
+            }
+        }
+    }
+
+    fn weights_for(&mut self, interfaces: &[String]) -> HashMap<String, f64> {
+        self.reload_if_needed();
+        interfaces
+            .iter()
+            .map(|name| {
+                let weight = self.weights.get(name).copied().unwrap_or(1.0);
+                (name.clone(), if weight <= 0.0 { 0.0 } else { weight })
+            })
+            .collect()
+    }
+
+    fn save_internal(&mut self) -> io::Result<()> {
+        if let Some(parent) = self.path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+        let serialized = serde_yaml::to_string(&self.weights)
+            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        fs::write(&self.path, serialized)?;
+        self.last_modified = fs::metadata(&self.path)
+            .ok()
+            .and_then(|meta| meta.modified().ok());
+        self.version = self.version.wrapping_add(1);
+        Ok(())
+    }
+
+    fn version(&self) -> u64 {
+        self.version
+    }
+}
+
+#[derive(Clone)]
+struct WeightedServer {
+    name: String,
+    weight: f64,
+    current_weight: f64,
+}
+
+impl WeightedServer {
+    fn new(name: String, weight: f64) -> Option<Self> {
+        if weight <= 0.0 {
+            return None;
+        }
+        Some(WeightedServer {
+            name,
+            weight,
+            current_weight: 0.0,
+        })
+    }
+}
+
+struct WeightedRoundRobinState {
+    servers: Vec<WeightedServer>,
+    total_weight: f64,
+    last_version: u64,
+    signature: Vec<String>,
+}
+
+impl WeightedRoundRobinState {
+    fn new() -> Self {
+        WeightedRoundRobinState {
+            servers: Vec::new(),
+            total_weight: 0.0,
+            last_version: 0,
+            signature: Vec::new(),
+        }
+    }
+
+    fn rebuild(&mut self, interfaces: &[String], weights: &HashMap<String, f64>, version: u64) {
+        if version == self.last_version && *interfaces == self.signature {
+            return;
+        }
+
+        self.servers = interfaces
+            .iter()
+            .filter_map(|name| {
+                weights
+                    .get(name)
+                    .copied()
+                    .and_then(|w| WeightedServer::new(name.clone(), w))
+            })
+            .collect();
+        self.total_weight = self.servers.iter().map(|s| s.weight).sum();
+        for server in &mut self.servers {
+            server.current_weight = 0.0;
+        }
+        self.signature = interfaces.to_vec();
+        self.last_version = version;
+    }
+
+    fn next_interface(&mut self) -> Option<String> {
+        if self.servers.is_empty() || self.total_weight <= 0.0 {
+            return None;
+        }
+
+        let mut best_index: Option<usize> = None;
+        let mut best_weight = f64::NEG_INFINITY;
+        for (idx, server) in self.servers.iter_mut().enumerate() {
+            server.current_weight += server.weight;
+            if server.current_weight > best_weight {
+                best_weight = server.current_weight;
+                best_index = Some(idx);
+            }
+        }
+
+        if let Some(index) = best_index {
+            let chosen = self.servers[index].name.clone();
+            self.servers[index].current_weight -= self.total_weight;
+            Some(chosen)
+        } else {
+            None
+        }
+    }
 }
 
 //
@@ -244,7 +488,10 @@ async fn create_send_thread(
     tokio::spawn(async move {
         wg_write_back(&ifname_owned, routine_clone, wg_sock, wg_addr).await;
     });
-    sending_channels.lock().unwrap().insert(ifname.to_string(), routine);
+    sending_channels
+        .lock()
+        .unwrap()
+        .insert(ifname.to_string(), routine);
 }
 
 async fn wg_write_back(
@@ -277,6 +524,7 @@ async fn update_available_interfaces(
     wg_addr: Arc<RwLock<Option<SocketAddr>>>,
     sending_channels: SendingChannels,
     cfg: ClientConfig,
+    weight_manager: Arc<Mutex<WeightManager>>,
 ) {
     loop {
         let ifaces = get_if_addrs().unwrap_or_default();
@@ -285,7 +533,10 @@ async fn update_available_interfaces(
             let keys: Vec<String> = channels.keys().cloned().collect();
             for ifname in keys {
                 if !interface_exists(&ifname) || is_excluded(&ifname, &cfg.excluded_interfaces) {
-                    info!("Interface '{}' not available or excluded, removing routine", ifname);
+                    info!(
+                        "Interface '{}' not available or excluded, removing routine",
+                        ifname
+                    );
                     channels.remove(&ifname);
                 } else if let Some(current_ip) = get_address_by_interface(&ifname) {
                     if current_ip != channels.get(&ifname).unwrap().src_addr {
@@ -304,6 +555,10 @@ async fn update_available_interfaces(
                 continue;
             }
             if let Some(ip) = get_address_by_interface(&ifname) {
+                {
+                    let mut manager = weight_manager.lock().unwrap();
+                    manager.ensure_interfaces(&[ifname.clone()]);
+                }
                 info!("New interface '{}' with IP '{}'", ifname, ip);
                 create_send_thread(
                     &ifname,
@@ -325,6 +580,9 @@ async fn receive_from_wireguard(
     sending_channels: SendingChannels,
     wg_addr: Arc<RwLock<Option<SocketAddr>>>,
     write_timeout: Duration,
+    aggregation: AggregationAlgorithm,
+    weight_manager: Arc<Mutex<WeightManager>>,
+    round_robin_state: Arc<Mutex<WeightedRoundRobinState>>,
 ) {
     let mut buf = vec![0u8; 1500];
     loop {
@@ -340,24 +598,95 @@ async fn receive_from_wireguard(
             *wg_addr_lock = Some(src_addr);
         }
         let channels_snapshot = sending_channels.lock().unwrap().clone();
-        let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
-            let src_sock = routine.src_sock.clone();
-            let dst_addr = routine.dst_addr;
-            let data = buf[..n].to_vec();
-            async move {
-                let fut = src_sock.send_to(&data, dst_addr);
-                (ifname, tokio::time::timeout(write_timeout, fut).await)
-            }
-        });
-        let results = futures::future::join_all(sends).await;
-        for (ifname, result) in results {
-            match result {
-                Ok(Ok(_)) => {}
-                Ok(Err(e)) => {
-                    warn!("Error writing to {}: {}", ifname, e);
+        let mut interface_names: Vec<String> = channels_snapshot.keys().cloned().collect();
+        interface_names.sort();
+
+        match aggregation {
+            AggregationAlgorithm::MirrorAll => {
+                let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
+                    let src_sock = routine.src_sock.clone();
+                    let dst_addr = routine.dst_addr;
+                    let data = buf[..n].to_vec();
+                    async move {
+                        let fut = src_sock.send_to(&data, dst_addr);
+                        (ifname, tokio::time::timeout(write_timeout, fut).await)
+                    }
+                });
+                let results = futures::future::join_all(sends).await;
+                for (ifname, result) in results {
+                    match result {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            warn!("Error writing to {}: {}", ifname, e);
+                        }
+                        Err(_) => {
+                            warn!("Timeout writing to {}", ifname);
+                        }
+                    }
                 }
-                Err(_) => {
-                    warn!("Timeout writing to {}", ifname);
+            }
+            AggregationAlgorithm::WeightedRoundRobin => {
+                if interface_names.is_empty() {
+                    continue;
+                }
+
+                let (weights_map, weights_version) = {
+                    let mut manager = weight_manager.lock().unwrap();
+                    let map = manager.weights_for(&interface_names);
+                    (map, manager.version())
+                };
+
+                let selected_interface = {
+                    let mut state = round_robin_state.lock().unwrap();
+                    state.rebuild(&interface_names, &weights_map, weights_version);
+                    state.next_interface()
+                };
+
+                if let Some(ifname) = selected_interface {
+                    if let Some(routine) = channels_snapshot.get(&ifname) {
+                        let src_sock = routine.src_sock.clone();
+                        let dst_addr = routine.dst_addr;
+                        let data = buf[..n].to_vec();
+                        match tokio::time::timeout(write_timeout, src_sock.send_to(&data, dst_addr))
+                            .await
+                        {
+                            Ok(Ok(_)) => {}
+                            Ok(Err(e)) => {
+                                warn!("Error writing to {}: {}", ifname, e);
+                            }
+                            Err(_) => {
+                                warn!("Timeout writing to {}", ifname);
+                            }
+                        }
+                    }
+                }
+            }
+            AggregationAlgorithm::Hybrid => {
+                if !HYBRID_WARNING_EMITTED.swap(true, Ordering::SeqCst) {
+                    warn!(
+                        "Hybrid aggregation algorithm is WIP. Falling back to mirror-all behavior."
+                    );
+                }
+                let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
+                    let src_sock = routine.src_sock.clone();
+                    let dst_addr = routine.dst_addr;
+                    let data = buf[..n].to_vec();
+                    async move {
+                        let fut = src_sock.send_to(&data, dst_addr);
+                        (ifname, tokio::time::timeout(write_timeout, fut).await)
+                    }
+                });
+                let results = futures::future::join_all(sends).await;
+                for (ifname, result) in results {
+                    match result {
+                        Ok(Ok(_)) => {}
+                        Ok(Err(e)) => {
+                            warn!("Error writing to {}: {}", ifname, e);
+                        }
+                        Err(_) => {
+                            warn!("Timeout writing to {}", ifname);
+                        }
+                    }
                 }
             }
         }
@@ -408,7 +737,9 @@ async fn handle_get_list(
             last = None;
         } else if let Some(routine) = channels.get(&ifname) {
             status = "active".to_string();
-            let elapsed = now.duration_since(*routine.last_rec.lock().unwrap()).as_secs();
+            let elapsed = now
+                .duration_since(*routine.last_rec.lock().unwrap())
+                .as_secs();
             last = Some(elapsed);
         } else {
             status = "idle".to_string();
@@ -432,7 +763,9 @@ async fn handle_get_list(
     Ok(warp::reply::json(&response))
 }
 
-async fn handle_swap_exclusion(body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_swap_exclusion(
+    body: serde_json::Value,
+) -> Result<impl warp::Reply, warp::Rejection> {
     if let Some(iface) = body.get("interface").and_then(|v| v.as_str()) {
         swap_exclusion(iface);
         let resp = serde_json::json!({ "status": "ok" });
@@ -492,7 +825,7 @@ fn with_client_config(
 
 async fn run_webserver(
     listen_addr: &str,
-    web_cfg: WebManagerConfig,
+    _web_cfg: WebManagerConfig,
     sending_channels: SendingChannels,
     cfg: ClientConfig,
 ) {
@@ -538,11 +871,13 @@ async fn main() {
     env_logger::init();
 
     // Legge la configurazione (default "engarde.yml")
-    let config_path = std::env::args().nth(1).unwrap_or_else(|| "engarde.yml".to_string());
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "engarde.yml".to_string());
     let config_str = std::fs::read_to_string(&config_path)
         .unwrap_or_else(|e| panic!("Error reading {}: {}", config_path, e));
-    let config: Config = serde_yaml::from_str(&config_str)
-        .unwrap_or_else(|e| panic!("Error parsing config: {}", e));
+    let config: Config =
+        serde_yaml::from_str(&config_str).unwrap_or_else(|e| panic!("Error parsing config: {}", e));
     let cfg = config.client.clone();
 
     if cfg.listen_addr.is_empty() {
@@ -569,6 +904,28 @@ async fn main() {
 
     let wg_addr: Arc<RwLock<Option<SocketAddr>>> = Arc::new(RwLock::new(None));
 
+    let aggregation = AggregationAlgorithm::from_config(cfg.aggregation_algorithm);
+    info!("Aggregation algorithm selected: {}", aggregation.describe());
+
+    let weights_path = if let Some(custom) = &cfg.weights_file {
+        PathBuf::from(custom)
+    } else {
+        let config_path_buf = PathBuf::from(&config_path);
+        let parent = config_path_buf
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        let stem = config_path_buf
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("engarde");
+        parent.join(format!("{}.weights.yml", stem))
+    };
+
+    let weight_manager = Arc::new(Mutex::new(WeightManager::new(weights_path)));
+    let round_robin_state = Arc::new(Mutex::new(WeightedRoundRobinState::new()));
+
     if let Some(web) = cfg.web_manager.clone() {
         let listen = web.listen_addr.clone();
         let sending_channels_clone = sending_channels.clone();
@@ -582,9 +939,26 @@ async fn main() {
     let cfg_clone = cfg.clone();
     let wg_sock_clone = wg_sock.clone();
     let wg_addr_clone = wg_addr.clone();
+    let weight_manager_clone = weight_manager.clone();
     tokio::spawn(async move {
-        update_available_interfaces(wg_sock_clone, wg_addr_clone, sending_channels_clone, cfg_clone).await;
+        update_available_interfaces(
+            wg_sock_clone,
+            wg_addr_clone,
+            sending_channels_clone,
+            cfg_clone,
+            weight_manager_clone,
+        )
+        .await;
     });
 
-    receive_from_wireguard(wg_sock, sending_channels, wg_addr, write_timeout).await;
+    receive_from_wireguard(
+        wg_sock,
+        sending_channels,
+        wg_addr,
+        write_timeout,
+        aggregation,
+        weight_manager,
+        round_robin_state,
+    )
+    .await;
 }

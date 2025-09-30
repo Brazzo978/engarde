@@ -110,6 +110,7 @@ client:
   listenAddr: "$ENG_LISTEN"
   dstAddr: "$ENG_DST"
   writeTimeout: 10
+  aggregationAlgorithm: 1
   excludedInterfaces:
     - "wg0"
     - "lo"
