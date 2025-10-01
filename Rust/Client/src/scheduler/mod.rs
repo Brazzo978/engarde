@@ -106,7 +106,8 @@ impl SchedulerAlgorithm {
         match value {
             1 => SchedulerAlgorithm::Mirror,
             2 => SchedulerAlgorithm::WeightedRoundRobin,
-            3 => SchedulerAlgorithm::Mirror,
+            3 => SchedulerAlgorithm::Replica2Weighted,
+            4 => SchedulerAlgorithm::FecKn,
             _ => SchedulerAlgorithm::Mirror,
         }
     }
@@ -653,6 +654,25 @@ replica2:
         assert_eq!(config.replica2.loss_penalty, 5.0);
         assert_eq!(config.replica2.queue_penalty_scale, 1.0);
         assert_eq!(config.replica2.rtt_alpha, 1.0);
+    }
+
+    #[test]
+    fn parse_numeric_aggregation_algorithm_identifiers() {
+        let yaml = r#"
+minLinksForAggregation: 3
+aggregationAlgorithm: 3
+replica2: {}
+"#;
+        let config: AggregationConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.algorithm, SchedulerAlgorithm::Replica2Weighted);
+
+        let yaml = r#"
+minLinksForAggregation: 3
+aggregationAlgorithm: 4
+replica2: {}
+"#;
+        let config: AggregationConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.algorithm, SchedulerAlgorithm::FecKn);
     }
 
     #[test]
