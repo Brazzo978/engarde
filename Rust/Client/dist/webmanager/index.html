@@ -1,14 +1,401 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
 <head>
   <meta charset="utf-8">
-  <title>engarde web manager</title>
-  <base href="/">
-
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-<link rel="stylesheet" href="styles.2c7aad863278de876f9a.css"></head>
-<body class="mat-app-background">
-  <app-root></app-root>
-<script src="runtime-es2015.00a1d898fe9540cdfc2a.js" type="module"></script><script src="runtime-es5.00a1d898fe9540cdfc2a.js" nomodule defer></script><script src="polyfills-es5.196c0fa068e76d1cc044.js" nomodule defer></script><script src="polyfills-es2015.7d48e6b26d37d7ca52a8.js" type="module"></script><script src="main-es2015.151367e60cb04fb334f8.js" type="module"></script><script src="main-es5.151367e60cb04fb334f8.js" nomodule defer></script></body>
+  <title>engarde web manager</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' ry='18' fill='%230a1b33'/%3E%3Cpath fill='%237ae0ff' d='M20 72L50 18l30 54H20zm26-10h8l-4-10-4 10z'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0f1625;
+      --card: #111a2f;
+      --muted: #8ea0bf;
+      --accent: #7ae0ff;
+      --danger: #ff6b6b;
+      --success: #7bd88f;
+      --warning: #ffb86c;
+      --border: #1c2a45;
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 20% 20%, rgba(122,224,255,0.08), transparent 25%),
+                  radial-gradient(circle at 80% 0%, rgba(123,216,143,0.06), transparent 18%),
+                  radial-gradient(circle at 50% 90%, rgba(255,107,107,0.06), transparent 22%),
+                  #0a0f1c;
+      color: #e6ecf9;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+
+    .app { max-width: 1200px; margin: 0 auto; padding: 32px 18px 48px; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; display: flex; gap: 8px; align-items: center; }
+    .pill { background: rgba(122,224,255,0.12); color: #b9ebff; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(122,224,255,0.2); }
+    .card { background: rgba(17,26,47,0.8); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(4px); }
+    .subtle { color: var(--muted); font-size: 14px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .stat { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .stat .value { font-size: 26px; font-weight: 700; }
+
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: center; }
+    .controls .group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; font-weight: 600; background: linear-gradient(120deg, rgba(122,224,255,0.2), rgba(122,224,255,0.08)); color: #e8f7ff; transition: transform .15s, border-color .15s, background .15s; text-decoration: none; }
+    .btn:hover { transform: translateY(-1px); border-color: rgba(122,224,255,0.7); }
+    .btn.secondary { background: transparent; color: #e6ecf9; }
+    .btn.danger { background: rgba(255,107,107,0.12); color: #ffd6d6; border-color: rgba(255,107,107,0.3); }
+
+    .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+    .switch input { display: none; }
+    .toggle { width: 46px; height: 24px; background: #1f2c45; border-radius: 999px; position: relative; transition: background .2s; border: 1px solid var(--border); }
+    .toggle::after { content: ""; width: 18px; height: 18px; background: #e6ecf9; border-radius: 50%; position: absolute; top: 50%; left: 4px; transform: translateY(-50%); transition: transform .2s, background .2s; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .switch input:checked + .toggle { background: #44c1ff; }
+    .switch input:checked + .toggle::after { transform: translate(20px, -50%); background: #0a0f1c; }
+
+    .input { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: #f7fbff; width: 100%; font-size: 14px; }
+    .input:focus { outline: 2px solid rgba(122,224,255,0.4); }
+    .range { accent-color: #7ae0ff; width: 120px; }
+
+    .table-wrapper { overflow-x: auto; margin-top: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 12px 10px; font-size: 14px; }
+    th { color: var(--muted); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; font-size: 12px; }
+    tr { border-bottom: 1px solid #1a2338; transition: background .15s; }
+    tr:hover { background: rgba(255,255,255,0.02); }
+    .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .status.active { background: rgba(123,216,143,0.14); color: var(--success); border: 1px solid rgba(123,216,143,0.35); }
+    .status.idle { background: rgba(255,184,108,0.14); color: var(--warning); border: 1px solid rgba(255,184,108,0.35); }
+    .status.excluded { background: rgba(255,107,107,0.14); color: var(--danger); border: 1px solid rgba(255,107,107,0.35); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: #e6ecf9; border: 1px solid var(--border); }
+
+    .last-refresh { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+    .badge { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+
+    .log { display: grid; gap: 8px; }
+    .log-entry { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: #dbe7ff; font-size: 13px; }
+
+    .loader { width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(122,224,255,0.25); border-top-color: #7ae0ff; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 700px) {
+      header { flex-direction: column; align-items: flex-start; }
+      .controls { grid-template-columns: 1fr; }
+      th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">engarde web manager <span class="pill">single-file ui</span></div>
+      <div class="last-refresh" id="lastRefresh">Aggiornamento in corso...</div>
+    </header>
+
+    <section class="grid" id="metaCards">
+      <div class="card stat">
+        <div class="label">Versione</div>
+        <div class="value" id="version">—</div>
+        <div class="subtle">Identificativo build client</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Descrizione</div>
+        <div class="value" id="description">—</div>
+        <div class="subtle">Definita in engarde.yml</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Listen address</div>
+        <div class="value" id="listenAddress">—</div>
+        <div class="subtle">Endpoint UDP locale</div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 16px;">
+      <div class="controls">
+        <div class="group">
+          <button class="btn" id="refreshBtn" type="button">
+            <span class="loader" id="refreshLoader" style="display:none"></span>
+            <span>Aggiorna ora</span>
+          </button>
+          <label class="switch">
+            <input type="checkbox" id="autoRefresh" checked>
+            <span class="toggle"></span>
+            <span>Auto-refresh</span>
+          </label>
+          <input class="range" id="interval" type="range" min="2" max="30" value="4">
+          <span class="badge" id="intervalLabel">4s</span>
+        </div>
+        <div class="group" style="flex:1; min-width:240px;">
+          <input class="input" id="filter" type="search" placeholder="Filtra per nome o indirizzo...">
+        </div>
+        <div class="group" style="justify-content:flex-end;">
+          <button class="btn secondary" id="resetBtn" type="button">Reset esclusioni</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top: 16px;">
+      <div class="card stat">
+        <div class="label">Interfacce attive</div>
+        <div class="value" id="activeCount">0</div>
+        <div class="subtle">Attualmente instradate verso WireGuard</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Interfacce escluse</div>
+        <div class="value" id="excludedCount">0</div>
+        <div class="subtle">Ignorate dalla trasmissione</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Interfacce inattive</div>
+        <div class="value" id="idleCount">0</div>
+        <div class="subtle">Nessun traffico recente</div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div>
+          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Interfacce</div>
+          <h3 style="margin:4px 0 0;">Monitoraggio in tempo reale</h3>
+        </div>
+        <div class="badge">Ordina per: <span id="sortLabel">nome ↑</span></div>
+      </div>
+      <div class="table-wrapper">
+        <table id="table">
+          <thead>
+            <tr>
+              <th data-sort="name">Interfaccia</th>
+              <th data-sort="status">Stato</th>
+              <th data-sort="senderAddress">IP locale</th>
+              <th data-sort="dstAddress">Destinazione</th>
+              <th data-sort="last">Ultimo pacchetto</th>
+              <th>Azioni</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td colspan="6" style="text-align:center; padding:24px; color:var(--muted);">Caricamento...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 16px;">
+      <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Attività recenti</div>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+
+  <script>
+    const DEMO_MODE = new URLSearchParams(location.search).has('demo');
+    const state = {
+      data: null,
+      auto: true,
+      interval: 4000,
+      timer: null,
+      sort: { key: 'name', dir: 'asc' },
+      filter: ''
+    };
+
+    const qs = (id) => document.getElementById(id);
+    const logEl = qs('log');
+
+    function log(message) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      const ts = new Date().toLocaleTimeString();
+      entry.textContent = `[${ts}] ${message}`;
+      logEl.prepend(entry);
+      while (logEl.children.length > 8) logEl.removeChild(logEl.lastChild);
+    }
+
+    function humanizeLast(sec) {
+      if (sec === null || sec === undefined) return '—';
+      if (sec < 5) return 'adesso';
+      if (sec < 60) return `${sec}s fa`;
+      const m = Math.floor(sec / 60);
+      if (m < 60) return `${m}m fa`;
+      const h = Math.floor(m / 60);
+      return `${h}h fa`;
+    }
+
+    function setLoading(isLoading) {
+      qs('refreshLoader').style.display = isLoading ? 'inline-block' : 'none';
+      qs('refreshBtn').disabled = isLoading;
+    }
+
+    async function apiFetch(path, opts = {}) {
+      const options = { headers: { 'Content-Type': 'application/json' }, ...opts };
+      const resp = await fetch(path, options);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    async function fetchData() {
+      setLoading(true);
+      const start = Date.now();
+      try {
+        const data = DEMO_MODE ? demoPayload() : await apiFetch('/api/v1/get-list');
+        state.data = data;
+        render();
+        const delta = ((Date.now() - start) / 1000).toFixed(1);
+        qs('lastRefresh').textContent = `Aggiornato alle ${new Date().toLocaleTimeString()} (${delta}s)`;
+        log('Dati aggiornati');
+      } catch (err) {
+        qs('lastRefresh').textContent = `Impossibile contattare l'API (${err.message})`;
+        log(`Errore API: ${err.message}`);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    function demoPayload() {
+      return {
+        type: 'client',
+        version: 'DEMO',
+        description: 'Esempio offline',
+        listenAddress: '0.0.0.0:4780',
+        interfaces: [
+          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2 },
+          { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
+          { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
+        ]
+      };
+    }
+
+    function renderMeta(data) {
+      qs('version').textContent = data.version || '—';
+      qs('description').textContent = data.description || '—';
+      qs('listenAddress').textContent = data.listenAddress || '—';
+    }
+
+    function renderCounts(list) {
+      const active = list.filter(i => i.status === 'active').length;
+      const excluded = list.filter(i => i.status === 'excluded').length;
+      const idle = list.filter(i => i.status === 'idle').length;
+      qs('activeCount').textContent = active;
+      qs('excludedCount').textContent = excluded;
+      qs('idleCount').textContent = idle;
+    }
+
+    function sortedAndFiltered(list) {
+      const f = state.filter.trim().toLowerCase();
+      let arr = list;
+      if (f) {
+        arr = arr.filter(i => `${i.name} ${i.senderAddress} ${i.dstAddress}`.toLowerCase().includes(f));
+      }
+      const { key, dir } = state.sort;
+      const mult = dir === 'asc' ? 1 : -1;
+      return arr.slice().sort((a,b) => {
+        const av = a[key] ?? '';
+        const bv = b[key] ?? '';
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * mult;
+        return av.toString().localeCompare(bv.toString()) * mult;
+      });
+    }
+
+    function renderTable(list) {
+      const tbody = qs('tbody');
+      tbody.innerHTML = '';
+      if (!list.length) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--muted);">Nessuna interfaccia trovata</td></tr>';
+        return;
+      }
+      list.forEach(iface => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td><div class="chip"><strong>${iface.name}</strong></div></td>
+          <td><span class="status ${iface.status}">${iface.status}</span></td>
+          <td>${iface.senderAddress || '—'}</td>
+          <td>${iface.dstAddress || '—'}</td>
+          <td>${humanizeLast(iface.last)}</td>
+          <td></td>
+        `;
+        const actionCell = tr.lastElementChild;
+        const btn = document.createElement('button');
+        btn.className = 'btn ' + (iface.status === 'excluded' ? '' : 'danger');
+        btn.type = 'button';
+        btn.textContent = iface.status === 'excluded' ? 'Includi' : 'Escludi';
+        btn.onclick = () => handleToggle(iface);
+        actionCell.appendChild(btn);
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function handleToggle(iface) {
+      try {
+        const path = iface.status === 'excluded' ? '/api/v1/include' : '/api/v1/exclude';
+        await apiFetch(path, { method: 'POST', body: JSON.stringify({ interface: iface.name }) });
+        log(`${iface.name}: ${iface.status === 'excluded' ? 'inclusa' : 'esclusa'}`);
+        fetchData();
+      } catch (err) {
+        log(`Errore azione su ${iface.name}: ${err.message}`);
+        alert(`Operazione non riuscita: ${err.message}`);
+      }
+    }
+
+    async function resetExclusions() {
+      try {
+        await apiFetch('/api/v1/reset-exclusions', { method: 'POST' });
+        log('Esclusioni ripristinate');
+        fetchData();
+      } catch (err) {
+        log(`Reset fallito: ${err.message}`);
+        alert('Reset non riuscito');
+      }
+    }
+
+    function render() {
+      if (!state.data) return;
+      renderMeta(state.data);
+      const all = state.data.interfaces || [];
+      renderCounts(all);
+      const list = sortedAndFiltered(all);
+      renderTable(list);
+    }
+
+    function scheduleAutoRefresh() {
+      if (state.timer) clearInterval(state.timer);
+      if (!state.auto) return;
+      state.timer = setInterval(fetchData, state.interval);
+    }
+
+    // Event listeners
+    qs('refreshBtn').onclick = fetchData;
+    qs('autoRefresh').onchange = (e) => {
+      state.auto = e.target.checked;
+      scheduleAutoRefresh();
+    };
+    qs('interval').oninput = (e) => {
+      state.interval = Number(e.target.value) * 1000;
+      qs('intervalLabel').textContent = `${e.target.value}s`;
+      scheduleAutoRefresh();
+    };
+    qs('filter').oninput = (e) => {
+      state.filter = e.target.value;
+      render();
+    };
+    qs('resetBtn').onclick = resetExclusions;
+
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        const key = th.dataset.sort;
+        if (state.sort.key === key) {
+          state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sort = { key, dir: 'asc' };
+        }
+        qs('sortLabel').textContent = `${key} ${state.sort.dir === 'asc' ? '↑' : '↓'}`;
+        render();
+      };
+    });
+
+    // Bootstrap
+    qs('intervalLabel').textContent = `${qs('interval').value}s`;
+    if (DEMO_MODE) log('Modalità demo attiva: dati statici');
+    fetchData();
+    scheduleAutoRefresh();
+  </script>
+</body>
 </html>
