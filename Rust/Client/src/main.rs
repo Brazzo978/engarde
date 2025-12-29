@@ -67,6 +67,9 @@ struct SendingRoutine {
     src_addr: String,
     dst_addr: SocketAddr,
     last_rec: Arc<Mutex<Instant>>,
+    bytes_total: Arc<Mutex<u64>>,
+    last_traffic_check: Arc<Mutex<Instant>>,
+    last_traffic_total: Arc<Mutex<u64>>,
     // Campo presente per compatibilità con Go
     is_closing: Arc<Mutex<bool>>,
 }
@@ -84,6 +87,7 @@ struct WebInterface {
     senderAddress: String,
     dstAddress: String,
     last: Option<u64>,
+    trafficBps: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -237,6 +241,9 @@ async fn create_send_thread(
         src_addr: source_addr.to_string(),
         dst_addr,
         last_rec: Arc::new(Mutex::new(Instant::now())),
+        bytes_total: Arc::new(Mutex::new(0)),
+        last_traffic_check: Arc::new(Mutex::new(Instant::now())),
+        last_traffic_total: Arc::new(Mutex::new(0)),
         is_closing: Arc::new(Mutex::new(false)),
     };
     let routine_clone = routine.clone();
@@ -273,6 +280,7 @@ async fn wg_write_back(
             continue;
         }
         *routine.last_rec.lock().unwrap() = Instant::now();
+        *routine.bytes_total.lock().unwrap() += n as u64;
         if let Some(addr) = *wg_addr.read().await {
             if let Err(e) = wg_sock.send_to(&buf[..n], addr).await {
                 warn!("Error writing to WireGuard: {}", e);
@@ -356,10 +364,15 @@ async fn receive_from_wireguard(
         let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
             let src_sock = routine.src_sock.clone();
             let dst_addr = routine.dst_addr;
+            let bytes_total = routine.bytes_total.clone();
             let data = buf[..n].to_vec();
             async move {
                 let fut = src_sock.send_to(&data, dst_addr);
-                (ifname, tokio::time::timeout(write_timeout, fut).await)
+                let result = tokio::time::timeout(write_timeout, fut).await;
+                if matches!(result, Ok(Ok(_))) {
+                    *bytes_total.lock().unwrap() += data.len() as u64;
+                }
+                (ifname, result)
             }
         });
         let results = futures::future::join_all(sends).await;
@@ -420,18 +433,32 @@ async fn handle_get_list(
         let status;
         let dst = get_dst_by_ifname(&ifname, &cfg);
         let last;
+        let traffic_bps;
         if is_excluded(&ifname, &cfg.excluded_interfaces) {
             status = "excluded".to_string();
             last = None;
+            traffic_bps = None;
         } else if let Some(routine) = channels.get(&ifname) {
             status = "active".to_string();
             let elapsed = now
                 .duration_since(*routine.last_rec.lock().unwrap())
                 .as_secs();
             last = Some(elapsed);
+            let total = *routine.bytes_total.lock().unwrap();
+            let mut last_total = routine.last_traffic_total.lock().unwrap();
+            let mut last_check = routine.last_traffic_check.lock().unwrap();
+            let delta = total.saturating_sub(*last_total);
+            let elapsed_seconds = now
+                .duration_since(*last_check)
+                .as_secs_f64()
+                .max(0.5);
+            traffic_bps = Some((delta as f64 / elapsed_seconds) as u64);
+            *last_total = total;
+            *last_check = now;
         } else {
             status = "idle".to_string();
             last = None;
+            traffic_bps = None;
         }
         interfaces.push(WebInterface {
             name: ifname,
@@ -439,6 +466,7 @@ async fn handle_get_list(
             senderAddress: address,
             dstAddress: dst,
             last,
+            trafficBps: traffic_bps,
         });
     }
     let response = GetListResponse {

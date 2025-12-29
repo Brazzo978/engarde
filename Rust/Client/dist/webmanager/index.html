@@ -87,12 +87,26 @@
     .input:focus { outline: 2px solid rgba(122,224,255,0.4); }
     .range { accent-color: #7ae0ff; width: 120px; }
 
-    .table-wrapper { overflow-x: auto; margin-top: 10px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 12px 10px; font-size: 14px; }
-    th { color: var(--muted); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; font-size: 12px; }
-    tr { border-bottom: 1px solid var(--border); transition: background .15s; }
-    tr:hover { background: var(--panel); }
+    .interface-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 12px; }
+    .interface-box { border-radius: 16px; border: 1px solid var(--border); padding: 14px; background: var(--panel); min-height: 220px; display: flex; flex-direction: column; gap: 12px; }
+    .interface-box.active { border-color: rgba(123,216,143,0.45); }
+    .interface-box.inactive { border-color: rgba(255,184,108,0.45); }
+    .interface-box.excluded { border-color: rgba(255,107,107,0.45); }
+    .box-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .box-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .interface-list { display: grid; gap: 10px; }
+    .iface-card { padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); display: grid; gap: 6px; animation: floatIn .25s ease; transition: transform .2s ease, box-shadow .2s ease; }
+    .iface-card .row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+    .iface-card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .iface-card .value { font-weight: 600; }
+    .iface-traffic { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); }
+    .iface-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .iface-actions .btn { padding: 6px 10px; font-size: 12px; border-radius: 10px; }
+
+    @keyframes floatIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .status.active { background: rgba(123,216,143,0.14); color: var(--success); border: 1px solid rgba(123,216,143,0.35); }
     .status.idle { background: rgba(255,184,108,0.14); color: var(--warning); border: 1px solid rgba(255,184,108,0.35); }
@@ -197,22 +211,28 @@
         </div>
         <div class="badge">Ordina per: <span id="sortLabel">nome ↑</span></div>
       </div>
-      <div class="table-wrapper">
-        <table id="table">
-          <thead>
-            <tr>
-              <th data-sort="name">Interfaccia</th>
-              <th data-sort="status">Stato</th>
-              <th data-sort="senderAddress">IP locale</th>
-              <th data-sort="dstAddress">Destinazione</th>
-              <th data-sort="last">Ultimo pacchetto</th>
-              <th>Azioni</th>
-            </tr>
-          </thead>
-          <tbody id="tbody">
-            <tr><td colspan="6" style="text-align:center; padding:24px; color:var(--muted);">Caricamento...</td></tr>
-          </tbody>
-        </table>
+      <div class="interface-columns">
+        <div class="interface-box active">
+          <div class="box-header">
+            <div class="box-title">Active</div>
+            <span class="badge" id="activeBadge">0</span>
+          </div>
+          <div class="interface-list" id="activeList"></div>
+        </div>
+        <div class="interface-box inactive">
+          <div class="box-header">
+            <div class="box-title">Inactive</div>
+            <span class="badge" id="inactiveBadge">0</span>
+          </div>
+          <div class="interface-list" id="inactiveList"></div>
+        </div>
+        <div class="interface-box excluded">
+          <div class="box-header">
+            <div class="box-title">Excluded</div>
+            <span class="badge" id="excludedBadge">0</span>
+          </div>
+          <div class="interface-list" id="excludedList"></div>
+        </div>
       </div>
     </section>
 
@@ -307,7 +327,7 @@
         description: 'Esempio offline',
         listenAddress: '0.0.0.0:4780',
         interfaces: [
-          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2 },
+          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2, trafficBps: 142342 },
           { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
           { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
         ]
@@ -345,32 +365,87 @@
       });
     }
 
-    function renderTable(list) {
-      const tbody = qs('tbody');
-      tbody.innerHTML = '';
+    function formatTraffic(value) {
+      if (value === null || value === undefined) return '—';
+      if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB/s`;
+      if (value >= 1024) return `${(value / 1024).toFixed(1)} KB/s`;
+      return `${value} B/s`;
+    }
+
+    function renderInterfaceBoxes(list) {
+      const activeList = qs('activeList');
+      const inactiveList = qs('inactiveList');
+      const excludedList = qs('excludedList');
+      activeList.innerHTML = '';
+      inactiveList.innerHTML = '';
+      excludedList.innerHTML = '';
+
       if (!list.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:24px; color:var(--muted);">Nessuna interfaccia trovata</td></tr>';
+        const empty = '<div class="subtle" style="text-align:center; padding:24px;">Nessuna interfaccia trovata</div>';
+        activeList.innerHTML = empty;
+        inactiveList.innerHTML = empty;
+        excludedList.innerHTML = empty;
+        qs('activeBadge').textContent = 0;
+        qs('inactiveBadge').textContent = 0;
+        qs('excludedBadge').textContent = 0;
         return;
       }
+
+      const statusLabels = {
+        active: 'Active',
+        idle: 'Inactive',
+        excluded: 'Excluded'
+      };
+
       list.forEach(iface => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><div class="chip"><strong>${iface.name}</strong></div></td>
-          <td><span class="status ${iface.status}">${iface.status}</span></td>
-          <td>${iface.senderAddress || '—'}</td>
-          <td>${iface.dstAddress || '—'}</td>
-          <td>${humanizeLast(iface.last)}</td>
-          <td></td>
+        const card = document.createElement('div');
+        card.className = 'iface-card';
+        const traffic = iface.status === 'active' ? `
+          <div class="iface-traffic">
+            <span class="label">Traffic</span>
+            <span class="value">${formatTraffic(iface.trafficBps)}</span>
+          </div>
+        ` : '';
+        card.innerHTML = `
+          <div class="row">
+            <div class="chip"><strong>${iface.name}</strong></div>
+            <span class="status ${iface.status}">${statusLabels[iface.status] || iface.status}</span>
+          </div>
+          <div class="row">
+            <span class="label">Sender</span>
+            <span class="value">${iface.senderAddress || '—'}</span>
+          </div>
+          <div class="row">
+            <span class="label">Destinazione</span>
+            <span class="value">${iface.dstAddress || '—'}</span>
+          </div>
+          <div class="row">
+            <span class="label">Ultimo pacchetto</span>
+            <span class="value">${humanizeLast(iface.last)}</span>
+          </div>
+          ${traffic}
+          <div class="iface-actions"></div>
         `;
-        const actionCell = tr.lastElementChild;
+        const actionRow = card.querySelector('.iface-actions');
         const btn = document.createElement('button');
         btn.className = 'btn ' + (iface.status === 'excluded' ? '' : 'danger');
         btn.type = 'button';
         btn.textContent = iface.status === 'excluded' ? 'Includi' : 'Escludi';
         btn.onclick = () => handleToggle(iface);
-        actionCell.appendChild(btn);
-        tbody.appendChild(tr);
+        actionRow.appendChild(btn);
+
+        if (iface.status === 'active') {
+          activeList.appendChild(card);
+        } else if (iface.status === 'excluded') {
+          excludedList.appendChild(card);
+        } else {
+          inactiveList.appendChild(card);
+        }
       });
+
+      qs('activeBadge').textContent = activeList.children.length || 0;
+      qs('inactiveBadge').textContent = inactiveList.children.length || 0;
+      qs('excludedBadge').textContent = excludedList.children.length || 0;
     }
 
     async function handleToggle(iface) {
@@ -402,7 +477,7 @@
       const all = state.data.interfaces || [];
       renderCounts(all);
       const list = sortedAndFiltered(all);
-      renderTable(list);
+      renderInterfaceBoxes(list);
     }
 
     function scheduleAutoRefresh() {
