@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     process::Command,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -105,19 +105,6 @@ struct GetListResponse {
 }
 
 static VERSION: &str = "0.1.0-beta02";
-const MTU_CACHE_TTL: Duration = Duration::from_secs(600);
-
-#[derive(Clone)]
-struct CachedMtu {
-    value: Option<u32>,
-    checked_at: Instant,
-}
-
-static MTU_CACHE: OnceLock<Mutex<HashMap<String, CachedMtu>>> = OnceLock::new();
-
-fn get_mtu_cache() -> &'static Mutex<HashMap<String, CachedMtu>> {
-    MTU_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
 
 //
 // Custom rejection per Warp
@@ -273,35 +260,6 @@ fn get_path_mtu(ifname: &str, dest_ip: IpAddr) -> Option<u32> {
         }
     }
     best.map(|payload| payload + header_size)
-}
-
-async fn get_cached_path_mtu(ifname: &str, dest_ip: IpAddr) -> Option<u32> {
-    let cache_key = format!("{}|{}", ifname, dest_ip);
-    let now = Instant::now();
-    if let Some(cached) = {
-        let cache = get_mtu_cache().lock().unwrap();
-        cache.get(&cache_key).cloned()
-    } {
-        if now.duration_since(cached.checked_at) < MTU_CACHE_TTL {
-            return cached.value;
-        }
-    }
-
-    let ifname_owned = ifname.to_string();
-    let result = tokio::task::spawn_blocking(move || get_path_mtu(&ifname_owned, dest_ip))
-        .await
-        .ok()
-        .flatten();
-
-    let mut cache = get_mtu_cache().lock().unwrap();
-    cache.insert(
-        cache_key,
-        CachedMtu {
-            value: result,
-            checked_at: Instant::now(),
-        },
-    );
-    result
 }
 
 //
@@ -527,6 +485,7 @@ async fn handle_get_list(
     cfg: ClientConfig,
 ) -> Result<impl warp::Reply, warp::Rejection> {
     let now = Instant::now();
+    let channels = sending_channels.lock().unwrap();
     let mut interfaces = Vec::new();
     let ifaces = get_if_addrs().unwrap_or_default();
     let mut seen = HashSet::new();
@@ -546,33 +505,28 @@ async fn handle_get_list(
             last = None;
             traffic_bps = None;
             physical_mtu = None;
-        } else if let Some(routine) = {
-            let channels = sending_channels.lock().unwrap();
-            channels.get(&ifname).cloned()
-        } {
+        } else if let Some(routine) = channels.get(&ifname) {
             status = "active".to_string();
             let elapsed = now
                 .duration_since(*routine.last_rec.lock().unwrap())
                 .as_secs();
             last = Some(elapsed);
             let total = *routine.bytes_total.lock().unwrap();
-            traffic_bps = {
-                let mut last_total = routine.last_traffic_total.lock().unwrap();
-                let mut last_check = routine.last_traffic_check.lock().unwrap();
-                let delta = total.saturating_sub(*last_total);
-                let elapsed_seconds = now
-                    .duration_since(*last_check)
-                    .as_secs_f64()
-                    .max(0.5);
-                *last_total = total;
-                *last_check = now;
-                Some((delta as f64 / elapsed_seconds) as u64)
-            };
+            let mut last_total = routine.last_traffic_total.lock().unwrap();
+            let mut last_check = routine.last_traffic_check.lock().unwrap();
+            let delta = total.saturating_sub(*last_total);
+            let elapsed_seconds = now
+                .duration_since(*last_check)
+                .as_secs_f64()
+                .max(0.5);
+            traffic_bps = Some((delta as f64 / elapsed_seconds) as u64);
+            *last_total = total;
+            *last_check = now;
             let mtu_target = resolve_mtu_probe_ip(&dst);
             if address.is_empty() {
                 physical_mtu = None;
             } else {
-                physical_mtu = get_cached_path_mtu(&ifname, mtu_target).await;
+                physical_mtu = get_path_mtu(&ifname, mtu_target);
             }
         } else {
             status = "idle".to_string();
