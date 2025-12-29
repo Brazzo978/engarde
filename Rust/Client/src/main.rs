@@ -95,7 +95,7 @@ struct GetListResponse {
     interfaces: Vec<WebInterface>,
 }
 
-static VERSION: &str = "UNOFFICIAL BUILD";
+static VERSION: &str = "0.1.0-beta02";
 
 //
 // Custom rejection per Warp

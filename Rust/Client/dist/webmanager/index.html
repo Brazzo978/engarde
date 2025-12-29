@@ -8,8 +8,13 @@
   <style>
     :root {
       color-scheme: light dark;
-      --bg: #0f1625;
-      --card: #111a2f;
+      --bg: #0a0f1c;
+      --bg-accent-1: radial-gradient(circle at 20% 20%, rgba(122,224,255,0.08), transparent 25%);
+      --bg-accent-2: radial-gradient(circle at 80% 0%, rgba(123,216,143,0.06), transparent 18%);
+      --bg-accent-3: radial-gradient(circle at 50% 90%, rgba(255,107,107,0.06), transparent 22%);
+      --card: rgba(17,26,47,0.8);
+      --panel: rgba(255,255,255,0.02);
+      --text: #e6ecf9;
       --muted: #8ea0bf;
       --accent: #7ae0ff;
       --danger: #ff6b6b;
@@ -17,12 +22,35 @@
       --warning: #ffb86c;
       --border: #1c2a45;
       --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --toggle-bg: #1f2c45;
+      --toggle-knob: #e6ecf9;
+      --toggle-active: #44c1ff;
+      --toggle-active-knob: #0a0f1c;
       font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-      background: radial-gradient(circle at 20% 20%, rgba(122,224,255,0.08), transparent 25%),
-                  radial-gradient(circle at 80% 0%, rgba(123,216,143,0.06), transparent 18%),
-                  radial-gradient(circle at 50% 90%, rgba(255,107,107,0.06), transparent 22%),
-                  #0a0f1c;
-      color: #e6ecf9;
+      background: var(--bg-accent-1), var(--bg-accent-2), var(--bg-accent-3), var(--bg);
+      color: var(--text);
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --bg-accent-1: radial-gradient(circle at 20% 20%, rgba(10,88,202,0.08), transparent 28%);
+      --bg-accent-2: radial-gradient(circle at 80% 0%, rgba(28,155,110,0.08), transparent 20%);
+      --bg-accent-3: radial-gradient(circle at 50% 90%, rgba(255,137,76,0.08), transparent 24%);
+      --card: rgba(255,255,255,0.88);
+      --panel: rgba(10,24,46,0.05);
+      --text: #1f2a3a;
+      --muted: #5a6b87;
+      --accent: #0b8bd5;
+      --danger: #d84b4b;
+      --success: #198754;
+      --warning: #c9781f;
+      --border: rgba(31,42,58,0.16);
+      --shadow: 0 10px 32px rgba(17,33,68,0.12);
+      --toggle-bg: #d7e2f3;
+      --toggle-knob: #ffffff;
+      --toggle-active: #0b8bd5;
+      --toggle-active-knob: #f4f7fb;
     }
 
     * { box-sizing: border-box; }
@@ -32,29 +60,30 @@
     header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
     .title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; display: flex; gap: 8px; align-items: center; }
     .pill { background: rgba(122,224,255,0.12); color: #b9ebff; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(122,224,255,0.2); }
-    .card { background: rgba(17,26,47,0.8); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(4px); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(4px); }
     .subtle { color: var(--muted); font-size: 14px; }
+    .header-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
 
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
-    .stat { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+    .stat { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
     .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     .stat .value { font-size: 26px; font-weight: 700; }
 
     .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; align-items: center; }
     .controls .group { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; font-weight: 600; background: linear-gradient(120deg, rgba(122,224,255,0.2), rgba(122,224,255,0.08)); color: #e8f7ff; transition: transform .15s, border-color .15s, background .15s; text-decoration: none; }
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; font-weight: 600; background: linear-gradient(120deg, rgba(122,224,255,0.2), rgba(122,224,255,0.08)); color: var(--text); transition: transform .15s, border-color .15s, background .15s; text-decoration: none; }
     .btn:hover { transform: translateY(-1px); border-color: rgba(122,224,255,0.7); }
-    .btn.secondary { background: transparent; color: #e6ecf9; }
+    .btn.secondary { background: transparent; color: var(--text); }
     .btn.danger { background: rgba(255,107,107,0.12); color: #ffd6d6; border-color: rgba(255,107,107,0.3); }
 
     .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
     .switch input { display: none; }
-    .toggle { width: 46px; height: 24px; background: #1f2c45; border-radius: 999px; position: relative; transition: background .2s; border: 1px solid var(--border); }
-    .toggle::after { content: ""; width: 18px; height: 18px; background: #e6ecf9; border-radius: 50%; position: absolute; top: 50%; left: 4px; transform: translateY(-50%); transition: transform .2s, background .2s; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
-    .switch input:checked + .toggle { background: #44c1ff; }
-    .switch input:checked + .toggle::after { transform: translate(20px, -50%); background: #0a0f1c; }
+    .toggle { width: 46px; height: 24px; background: var(--toggle-bg); border-radius: 999px; position: relative; transition: background .2s; border: 1px solid var(--border); }
+    .toggle::after { content: ""; width: 18px; height: 18px; background: var(--toggle-knob); border-radius: 50%; position: absolute; top: 50%; left: 4px; transform: translateY(-50%); transition: transform .2s, background .2s; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .switch input:checked + .toggle { background: var(--toggle-active); }
+    .switch input:checked + .toggle::after { transform: translate(20px, -50%); background: var(--toggle-active-knob); }
 
-    .input { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: #f7fbff; width: 100%; font-size: 14px; }
+    .input { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: var(--text); width: 100%; font-size: 14px; }
     .input:focus { outline: 2px solid rgba(122,224,255,0.4); }
     .range { accent-color: #7ae0ff; width: 120px; }
 
@@ -62,19 +91,19 @@
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 12px 10px; font-size: 14px; }
     th { color: var(--muted); font-weight: 700; letter-spacing: .02em; text-transform: uppercase; font-size: 12px; }
-    tr { border-bottom: 1px solid #1a2338; transition: background .15s; }
-    tr:hover { background: rgba(255,255,255,0.02); }
+    tr { border-bottom: 1px solid var(--border); transition: background .15s; }
+    tr:hover { background: var(--panel); }
     .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
     .status.active { background: rgba(123,216,143,0.14); color: var(--success); border: 1px solid rgba(123,216,143,0.35); }
     .status.idle { background: rgba(255,184,108,0.14); color: var(--warning); border: 1px solid rgba(255,184,108,0.35); }
     .status.excluded { background: rgba(255,107,107,0.14); color: var(--danger); border: 1px solid rgba(255,107,107,0.35); }
-    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: #e6ecf9; border: 1px solid var(--border); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); }
 
     .last-refresh { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .badge { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
 
     .log { display: grid; gap: 8px; }
-    .log-entry { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: #dbe7ff; font-size: 13px; }
+    .log-entry { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); font-size: 13px; }
 
     .loader { width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(122,224,255,0.25); border-top-color: #7ae0ff; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -90,7 +119,14 @@
   <div class="app">
     <header>
       <div class="title">engarde web manager <span class="pill">single-file ui</span></div>
-      <div class="last-refresh" id="lastRefresh">Aggiornamento in corso...</div>
+      <div class="header-actions">
+        <label class="switch" aria-label="Attiva tema scuro">
+          <input type="checkbox" id="themeToggle">
+          <span class="toggle"></span>
+          <span>Tema scuro</span>
+        </label>
+        <div class="last-refresh" id="lastRefresh">Aggiornamento in corso...</div>
+      </div>
     </header>
 
     <section class="grid" id="metaCards">
@@ -198,6 +234,21 @@
     };
 
     const qs = (id) => document.getElementById(id);
+    const themeToggle = qs('themeToggle');
+    const storedTheme = localStorage.getItem('engardeTheme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = storedTheme || (prefersDark ? 'dark' : 'light');
+
+    const applyTheme = (theme) => {
+      document.documentElement.dataset.theme = theme;
+      themeToggle.checked = theme === 'dark';
+      localStorage.setItem('engardeTheme', theme);
+    };
+
+    applyTheme(initialTheme);
+    themeToggle.addEventListener('change', () => {
+      applyTheme(themeToggle.checked ? 'dark' : 'light');
+    });
     const logEl = qs('log');
 
     function log(message) {
