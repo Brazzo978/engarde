@@ -297,8 +297,9 @@
         version: 'DEMO',
         description: 'Esempio offline',
         listenAddress: '0.0.0.0:4780',
+        wgMtu: 1420,
         interfaces: [
-          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2, trafficBps: 142342 },
+          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2, trafficBps: 142342, physicalMtu: 1492 },
           { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
           { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
         ]
@@ -308,7 +309,9 @@
     function renderMeta(data) {
       qs('version').textContent = data.version || '—';
       qs('description').textContent = data.description || '—';
-      qs('listenAddress').textContent = data.listenAddress || '—';
+      const listen = data.listenAddress || '—';
+      const wgMtu = data.wgMtu ? ` MTU: ${data.wgMtu}` : '';
+      qs('listenAddress').textContent = `${listen}${wgMtu}`;
     }
 
     function renderCounts(list) {
@@ -371,6 +374,12 @@
       list.forEach(iface => {
         const card = document.createElement('div');
         card.className = 'iface-card';
+        const mtuRow = iface.status === 'active' ? `
+          <div class="row">
+            <span class="label">MTU fisica</span>
+            <span class="value">${iface.physicalMtu ?? '—'}</span>
+          </div>
+        ` : '';
         const traffic = iface.status === 'active' ? `
           <div class="iface-traffic">
             <span class="label">Traffic</span>
@@ -394,6 +403,7 @@
             <span class="label">Ultimo pacchetto</span>
             <span class="value">${humanizeLast(iface.last)}</span>
           </div>
+          ${mtuRow}
           ${traffic}
           <div class="iface-actions"></div>
         `;
