@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, SocketAddr},
     process::Command,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
@@ -105,6 +105,19 @@ struct GetListResponse {
 }
 
 static VERSION: &str = "0.1.0-beta02";
+const MTU_CACHE_TTL: Duration = Duration::from_secs(600);
+
+#[derive(Clone)]
+struct CachedMtu {
+    value: Option<u32>,
+    checked_at: Instant,
+}
+
+static MTU_CACHE: OnceLock<Mutex<HashMap<String, CachedMtu>>> = OnceLock::new();
+
+fn get_mtu_cache() -> &'static Mutex<HashMap<String, CachedMtu>> {
+    MTU_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 //
 // Custom rejection per Warp
@@ -260,6 +273,35 @@ fn get_path_mtu(ifname: &str, dest_ip: IpAddr) -> Option<u32> {
         }
     }
     best.map(|payload| payload + header_size)
+}
+
+async fn get_cached_path_mtu(ifname: &str, dest_ip: IpAddr) -> Option<u32> {
+    let cache_key = format!("{}|{}", ifname, dest_ip);
+    let now = Instant::now();
+    if let Some(cached) = {
+        let cache = get_mtu_cache().lock().unwrap();
+        cache.get(&cache_key).cloned()
+    } {
+        if now.duration_since(cached.checked_at) < MTU_CACHE_TTL {
+            return cached.value;
+        }
+    }
+
+    let ifname_owned = ifname.to_string();
+    let result = tokio::task::spawn_blocking(move || get_path_mtu(&ifname_owned, dest_ip))
+        .await
+        .ok()
+        .flatten();
+
+    let mut cache = get_mtu_cache().lock().unwrap();
+    cache.insert(
+        cache_key,
+        CachedMtu {
+            value: result,
+            checked_at: Instant::now(),
+        },
+    );
+    result
 }
 
 //
@@ -526,7 +568,7 @@ async fn handle_get_list(
             if address.is_empty() {
                 physical_mtu = None;
             } else {
-                physical_mtu = get_path_mtu(&ifname, mtu_target);
+                physical_mtu = get_cached_path_mtu(&ifname, mtu_target).await;
             }
         } else {
             status = "idle".to_string();
