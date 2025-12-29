@@ -208,20 +208,6 @@ fn read_interface_mtu(ifname: &str) -> Option<u32> {
     value.trim().parse().ok()
 }
 
-fn parse_mtu_from_route(output: &str) -> Option<u32> {
-    let mut tokens = output.split_whitespace();
-    while let Some(token) = tokens.next() {
-        if token == "pmtu" || token == "mtu" {
-            if let Some(value) = tokens.next() {
-                if let Ok(parsed) = value.parse() {
-                    return Some(parsed);
-                }
-            }
-        }
-    }
-    None
-}
-
 fn resolve_mtu_probe_ip(dst_addr: &str) -> IpAddr {
     if let Ok(addr) = dst_addr.parse::<SocketAddr>() {
         return addr.ip();
@@ -232,22 +218,48 @@ fn resolve_mtu_probe_ip(dst_addr: &str) -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))
 }
 
-fn get_path_mtu(source_ip: &str, dest_ip: IpAddr) -> Option<u32> {
-    let output = Command::new("ip")
-        .args([
-            "route",
-            "get",
-            &dest_ip.to_string(),
-            "from",
-            source_ip,
-        ])
+fn probe_ping_payload(ifname: &str, dest_ip: IpAddr, payload_size: u32) -> bool {
+    let mut args = vec!["-c".to_string(), "1".to_string(), "-W".to_string(), "1".to_string()];
+    if dest_ip.is_ipv4() {
+        args.push("-M".to_string());
+        args.push("do".to_string());
+    } else {
+        args.push("-6".to_string());
+    }
+    args.push("-s".to_string());
+    args.push(payload_size.to_string());
+    args.push("-I".to_string());
+    args.push(ifname.to_string());
+    args.push(dest_ip.to_string());
+    Command::new("ping")
+        .args(args.iter().map(String::as_str))
         .output()
-        .ok()?;
-    if !output.status.success() {
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+fn get_path_mtu(ifname: &str, dest_ip: IpAddr) -> Option<u32> {
+    let header_size = if dest_ip.is_ipv4() { 28 } else { 48 };
+    let max_mtu = read_interface_mtu(ifname).unwrap_or(1500);
+    let max_payload = max_mtu.saturating_sub(header_size);
+    if max_payload == 0 {
         return None;
     }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_mtu_from_route(&stdout)
+    let mut low = 0;
+    let mut high = max_payload;
+    let mut best: Option<u32> = None;
+    while low <= high {
+        let mid = low + (high - low) / 2;
+        if probe_ping_payload(ifname, dest_ip, mid) {
+            best = Some(mid);
+            low = mid.saturating_add(1);
+        } else if mid == 0 {
+            break;
+        } else {
+            high = mid - 1;
+        }
+    }
+    best.map(|payload| payload + header_size)
 }
 
 //
@@ -514,7 +526,7 @@ async fn handle_get_list(
             if address.is_empty() {
                 physical_mtu = None;
             } else {
-                physical_mtu = get_path_mtu(&address, mtu_target);
+                physical_mtu = get_path_mtu(&ifname, mtu_target);
             }
         } else {
             status = "idle".to_string();
