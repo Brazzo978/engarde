@@ -63,6 +63,8 @@
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(4px); }
     .subtle { color: var(--muted); font-size: 14px; }
     .header-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
+    .header-refresh { display: inline-flex; align-items: center; gap: 8px; }
+    .header-refresh .input { width: 120px; text-align: center; }
 
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
     .stat { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
@@ -99,11 +101,7 @@
     .status.excluded { background: rgba(255,107,107,0.14); color: var(--danger); border: 1px solid rgba(255,107,107,0.35); }
     .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); }
 
-    .last-refresh { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
     .badge { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
-
-    .log { display: grid; gap: 8px; }
-    .log-entry { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: rgba(255,255,255,0.03); color: var(--text); font-size: 13px; }
 
     .loader { width: 16px; height: 16px; border-radius: 50%; border: 3px solid rgba(122,224,255,0.25); border-top-color: #7ae0ff; animation: spin 1s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -125,7 +123,10 @@
           <span class="toggle"></span>
           <span>Tema scuro</span>
         </label>
-        <div class="last-refresh" id="lastRefresh">Aggiornamento in corso...</div>
+        <div class="header-refresh" aria-label="Auto-refresh">
+          <input class="input" id="intervalInput" type="text" inputmode="numeric" placeholder="3s-60s">
+          <button class="btn secondary" id="applyInterval" type="button">Applica</button>
+        </div>
       </div>
     </header>
 
@@ -154,13 +155,6 @@
             <span class="loader" id="refreshLoader" style="display:none"></span>
             <span>Aggiorna ora</span>
           </button>
-          <label class="switch">
-            <input type="checkbox" id="autoRefresh" checked>
-            <span class="toggle"></span>
-            <span>Auto-refresh</span>
-          </label>
-          <input class="range" id="interval" type="range" min="2" max="30" value="4">
-          <span class="badge" id="intervalLabel">4s</span>
         </div>
         <div class="group" style="flex:1; min-width:240px;">
           <input class="input" id="filter" type="search" placeholder="Filtra per nome o indirizzo...">
@@ -216,10 +210,6 @@
       </div>
     </section>
 
-    <section class="card" style="margin-top: 16px;">
-      <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Attività recenti</div>
-      <div class="log" id="log"></div>
-    </section>
   </div>
 
   <script>
@@ -249,17 +239,6 @@
     themeToggle.addEventListener('change', () => {
       applyTheme(themeToggle.checked ? 'dark' : 'light');
     });
-    const logEl = qs('log');
-
-    function log(message) {
-      const entry = document.createElement('div');
-      entry.className = 'log-entry';
-      const ts = new Date().toLocaleTimeString();
-      entry.textContent = `[${ts}] ${message}`;
-      logEl.prepend(entry);
-      while (logEl.children.length > 8) logEl.removeChild(logEl.lastChild);
-    }
-
     function humanizeLast(sec) {
       if (sec === null || sec === undefined) return '—';
       if (sec < 5) return 'adesso';
@@ -284,17 +263,12 @@
 
     async function fetchData() {
       setLoading(true);
-      const start = Date.now();
       try {
         const data = DEMO_MODE ? demoPayload() : await apiFetch('/api/v1/get-list');
         state.data = data;
         render();
-        const delta = ((Date.now() - start) / 1000).toFixed(1);
-        qs('lastRefresh').textContent = `Aggiornato alle ${new Date().toLocaleTimeString()} (${delta}s)`;
-        log('Dati aggiornati');
       } catch (err) {
-        qs('lastRefresh').textContent = `Impossibile contattare l'API (${err.message})`;
-        log(`Errore API: ${err.message}`);
+        console.warn('Errore API:', err.message);
       } finally {
         setLoading(false);
       }
@@ -377,10 +351,8 @@
       try {
         const path = iface.status === 'excluded' ? '/api/v1/include' : '/api/v1/exclude';
         await apiFetch(path, { method: 'POST', body: JSON.stringify({ interface: iface.name }) });
-        log(`${iface.name}: ${iface.status === 'excluded' ? 'inclusa' : 'esclusa'}`);
         fetchData();
       } catch (err) {
-        log(`Errore azione su ${iface.name}: ${err.message}`);
         alert(`Operazione non riuscita: ${err.message}`);
       }
     }
@@ -388,10 +360,8 @@
     async function resetExclusions() {
       try {
         await apiFetch('/api/v1/reset-exclusions', { method: 'POST' });
-        log('Esclusioni ripristinate');
         fetchData();
       } catch (err) {
-        log(`Reset fallito: ${err.message}`);
         alert('Reset non riuscito');
       }
     }
@@ -413,13 +383,15 @@
 
     // Event listeners
     qs('refreshBtn').onclick = fetchData;
-    qs('autoRefresh').onchange = (e) => {
-      state.auto = e.target.checked;
-      scheduleAutoRefresh();
-    };
-    qs('interval').oninput = (e) => {
-      state.interval = Number(e.target.value) * 1000;
-      qs('intervalLabel').textContent = `${e.target.value}s`;
+    qs('applyInterval').onclick = () => {
+      const raw = qs('intervalInput').value.trim().toLowerCase().replace('s', '');
+      const value = Number.parseInt(raw, 10);
+      if (Number.isNaN(value) || value < 3 || value > 60) {
+        alert('Inserisci un valore valido tra 3s e 60s.');
+        return;
+      }
+      state.interval = value * 1000;
+      qs('intervalInput').value = `${value}s`;
       scheduleAutoRefresh();
     };
     qs('filter').oninput = (e) => {
@@ -443,8 +415,7 @@
     });
 
     // Bootstrap
-    qs('intervalLabel').textContent = `${qs('interval').value}s`;
-    if (DEMO_MODE) log('Modalità demo attiva: dati statici');
+    qs('intervalInput').value = `${state.interval / 1000}s`;
     fetchData();
     scheduleAutoRefresh();
   </script>
