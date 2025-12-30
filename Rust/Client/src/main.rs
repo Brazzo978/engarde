@@ -104,7 +104,7 @@ struct GetListResponse {
     wg_mtu: Option<u32>,
 }
 
-static VERSION: &str = "0.1.0-beta02";
+static VERSION: &str = "0.1.2";
 
 //
 // Custom rejection per Warp

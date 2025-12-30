@@ -138,7 +138,7 @@
           <span>Tema scuro</span>
         </label>
         <div class="header-refresh" aria-label="Auto-refresh">
-          <input class="input" id="intervalInput" type="text" inputmode="numeric" placeholder="3s-60s">
+          <input class="input" id="intervalInput" type="text" inputmode="numeric" placeholder="2s-60s">
           <button class="btn secondary" id="applyInterval" type="button">Applica</button>
         </div>
       </div>
@@ -234,7 +234,7 @@
     const state = {
       data: null,
       auto: true,
-      interval: 4000,
+      interval: 3000,
       timer: null,
       sort: { key: 'name', dir: 'asc' },
       filter: ''
@@ -468,8 +468,8 @@
     qs('applyInterval').onclick = () => {
       const raw = qs('intervalInput').value.trim().toLowerCase().replace('s', '');
       const value = Number.parseInt(raw, 10);
-      if (Number.isNaN(value) || value < 3 || value > 60) {
-        alert('Inserisci un valore valido tra 3s e 60s.');
+      if (Number.isNaN(value) || value < 2 || value > 60) {
+        alert('Inserisci un valore valido tra 2s e 60s.');
         return;
       }
       state.interval = value * 1000;
