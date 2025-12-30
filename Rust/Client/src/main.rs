@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    net::{IpAddr, Ipv4Addr, SocketAddr},
-    process::Command,
+    net::SocketAddr,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -89,8 +88,6 @@ struct WebInterface {
     dstAddress: String,
     last: Option<u64>,
     trafficBps: Option<u64>,
-    #[serde(rename = "physicalMtu")]
-    physical_mtu: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -206,48 +203,6 @@ fn read_interface_mtu(ifname: &str) -> Option<u32> {
     let path = format!("/sys/class/net/{}/mtu", ifname);
     let value = std::fs::read_to_string(path).ok()?;
     value.trim().parse().ok()
-}
-
-fn parse_mtu_from_route(output: &str) -> Option<u32> {
-    let mut tokens = output.split_whitespace();
-    while let Some(token) = tokens.next() {
-        if token == "pmtu" || token == "mtu" {
-            if let Some(value) = tokens.next() {
-                if let Ok(parsed) = value.parse() {
-                    return Some(parsed);
-                }
-            }
-        }
-    }
-    None
-}
-
-fn resolve_mtu_probe_ip(dst_addr: &str) -> IpAddr {
-    if let Ok(addr) = dst_addr.parse::<SocketAddr>() {
-        return addr.ip();
-    }
-    if let Ok(addr) = dst_addr.parse::<IpAddr>() {
-        return addr;
-    }
-    IpAddr::V4(Ipv4Addr::new(1, 1, 1, 1))
-}
-
-fn get_path_mtu(source_ip: &str, dest_ip: IpAddr) -> Option<u32> {
-    let output = Command::new("ip")
-        .args([
-            "route",
-            "get",
-            &dest_ip.to_string(),
-            "from",
-            source_ip,
-        ])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    parse_mtu_from_route(&stdout)
 }
 
 //
@@ -487,12 +442,10 @@ async fn handle_get_list(
         let dst = get_dst_by_ifname(&ifname, &cfg);
         let last;
         let traffic_bps;
-        let physical_mtu;
         if is_excluded(&ifname, &cfg.excluded_interfaces) {
             status = "excluded".to_string();
             last = None;
             traffic_bps = None;
-            physical_mtu = None;
         } else if let Some(routine) = channels.get(&ifname) {
             status = "active".to_string();
             let elapsed = now
@@ -510,17 +463,10 @@ async fn handle_get_list(
             traffic_bps = Some((delta as f64 / elapsed_seconds) as u64);
             *last_total = total;
             *last_check = now;
-            let mtu_target = resolve_mtu_probe_ip(&dst);
-            if address.is_empty() {
-                physical_mtu = None;
-            } else {
-                physical_mtu = get_path_mtu(&address, mtu_target);
-            }
         } else {
             status = "idle".to_string();
             last = None;
             traffic_bps = None;
-            physical_mtu = None;
         }
         interfaces.push(WebInterface {
             name: ifname,
@@ -529,7 +475,6 @@ async fn handle_get_list(
             dstAddress: dst,
             last,
             trafficBps: traffic_bps,
-            physical_mtu,
         });
     }
     let response = GetListResponse {
