@@ -2,13 +2,446 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>engarde web manager</title>
-  <base href="/">
-
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
-<link rel="stylesheet" href="styles.2c7aad863278de876f9a.css"></head>
-<body class="mat-app-background">
-  <app-root></app-root>
-<script src="runtime-es2015.00a1d898fe9540cdfc2a.js" type="module"></script><script src="runtime-es5.00a1d898fe9540cdfc2a.js" nomodule defer></script><script src="polyfills-es5.196c0fa068e76d1cc044.js" nomodule defer></script><script src="polyfills-es2015.7d48e6b26d37d7ca52a8.js" type="module"></script><script src="main-es2015.151367e60cb04fb334f8.js" type="module"></script><script src="main-es5.151367e60cb04fb334f8.js" nomodule defer></script></body>
+  <title>engarde web manager</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' ry='18' fill='%230a1b33'/%3E%3Cpath fill='%237ae0ff' d='M20 72L50 18l30 54H20zm26-10h8l-4-10-4 10z'/%3E%3C/svg%3E">
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #0a0f1c;
+      --bg-accent-1: radial-gradient(circle at 20% 20%, rgba(122,224,255,0.08), transparent 25%);
+      --bg-accent-2: radial-gradient(circle at 80% 0%, rgba(123,216,143,0.06), transparent 18%);
+      --bg-accent-3: radial-gradient(circle at 50% 90%, rgba(255,107,107,0.06), transparent 22%);
+      --card: rgba(17,26,47,0.8);
+      --panel: rgba(255,255,255,0.02);
+      --text: #e6ecf9;
+      --muted: #8ea0bf;
+      --accent: #7ae0ff;
+      --danger: #ff6b6b;
+      --success: #7bd88f;
+      --warning: #ffb86c;
+      --border: #1c2a45;
+      --shadow: 0 10px 40px rgba(0,0,0,.35);
+      --toggle-bg: #1f2c45;
+      --toggle-knob: #e6ecf9;
+      --toggle-active: #44c1ff;
+      --toggle-active-knob: #0a0f1c;
+      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background: var(--bg-accent-1), var(--bg-accent-2), var(--bg-accent-3), var(--bg);
+      color: var(--text);
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f4f7fb;
+      --bg-accent-1: radial-gradient(circle at 20% 20%, rgba(10,88,202,0.08), transparent 28%);
+      --bg-accent-2: radial-gradient(circle at 80% 0%, rgba(28,155,110,0.08), transparent 20%);
+      --bg-accent-3: radial-gradient(circle at 50% 90%, rgba(255,137,76,0.08), transparent 24%);
+      --card: rgba(255,255,255,0.88);
+      --panel: rgba(10,24,46,0.05);
+      --text: #1f2a3a;
+      --muted: #5a6b87;
+      --accent: #0b8bd5;
+      --danger: #d84b4b;
+      --success: #198754;
+      --warning: #c9781f;
+      --border: rgba(31,42,58,0.16);
+      --shadow: 0 10px 32px rgba(17,33,68,0.12);
+      --toggle-bg: #d7e2f3;
+      --toggle-knob: #ffffff;
+      --toggle-active: #0b8bd5;
+      --toggle-active-knob: #f4f7fb;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; }
+
+    .app { max-width: 1200px; margin: 0 auto; padding: 32px 18px 48px; }
+    header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .title { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; display: flex; gap: 8px; align-items: center; }
+    .pill { background: rgba(122,224,255,0.12); color: #b9ebff; padding: 6px 10px; border-radius: 999px; font-size: 12px; border: 1px solid rgba(122,224,255,0.2); }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(4px); }
+    .subtle { color: var(--muted); font-size: 14px; }
+    .header-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: flex-end; }
+    .header-refresh { display: inline-flex; align-items: center; gap: 8px; }
+    .header-refresh .input { width: 120px; text-align: center; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
+    .stat { padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--panel); }
+    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .stat .value { font-size: 26px; font-weight: 700; }
+
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); cursor: pointer; font-weight: 600; background: linear-gradient(120deg, rgba(122,224,255,0.2), rgba(122,224,255,0.08)); color: var(--text); transition: transform .15s, border-color .15s, background .15s; text-decoration: none; }
+    .btn:hover { transform: translateY(-1px); border-color: rgba(122,224,255,0.7); }
+    .btn.secondary { background: transparent; color: var(--text); }
+    .btn.danger { background: rgba(255,107,107,0.12); color: #ffd6d6; border-color: rgba(255,107,107,0.3); }
+
+    .switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; }
+    .switch input { display: none; }
+    .toggle { width: 46px; height: 24px; background: var(--toggle-bg); border-radius: 999px; position: relative; transition: background .2s; border: 1px solid var(--border); }
+    .toggle::after { content: ""; width: 18px; height: 18px; background: var(--toggle-knob); border-radius: 50%; position: absolute; top: 50%; left: 4px; transform: translateY(-50%); transition: transform .2s, background .2s; box-shadow: 0 2px 10px rgba(0,0,0,.3); }
+    .switch input:checked + .toggle { background: var(--toggle-active); }
+    .switch input:checked + .toggle::after { transform: translate(20px, -50%); background: var(--toggle-active-knob); }
+
+    .input { background: rgba(255,255,255,0.04); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; color: var(--text); width: 100%; font-size: 14px; }
+    .input:focus { outline: 2px solid rgba(122,224,255,0.4); }
+    .range { accent-color: #7ae0ff; width: 120px; }
+
+    .interface-columns { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 12px; }
+    .interface-box { border-radius: 16px; border: 1px solid var(--border); padding: 14px; background: var(--panel); min-height: 220px; display: flex; flex-direction: column; gap: 12px; }
+    .interface-box.active { border-color: rgba(123,216,143,0.45); }
+    .interface-box.inactive { border-color: rgba(255,184,108,0.45); }
+    .interface-box.excluded { border-color: rgba(255,107,107,0.45); }
+    .box-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .box-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+    .interface-list { display: grid; gap: 10px; }
+    .iface-card { padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--card); display: grid; gap: 6px; animation: floatIn .25s ease; transition: transform .2s ease, box-shadow .2s ease; }
+    .iface-card .row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+    .iface-card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .iface-card .value { font-weight: 600; }
+    .iface-traffic { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--accent); }
+    .iface-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .iface-actions .btn { padding: 6px 10px; font-size: 12px; border-radius: 10px; }
+
+    @keyframes floatIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .status { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .status.active { background: rgba(123,216,143,0.14); color: var(--success); border: 1px solid rgba(123,216,143,0.35); }
+    .status.idle { background: rgba(255,184,108,0.14); color: var(--warning); border: 1px solid rgba(255,184,108,0.35); }
+    .status.excluded { background: rgba(255,107,107,0.14); color: var(--danger); border: 1px solid rgba(255,107,107,0.35); }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); }
+
+    .badge { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+
+    @media (max-width: 700px) {
+      header { flex-direction: column; align-items: flex-start; }
+      .controls { grid-template-columns: 1fr; }
+      th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div class="title">engarde web manager <span class="pill">NG-UI</span></div>
+      <div class="header-actions">
+        <label class="switch" aria-label="Enable dark theme">
+          <input type="checkbox" id="themeToggle">
+          <span class="toggle"></span>
+          <span>Dark theme</span>
+        </label>
+        <div class="header-refresh" aria-label="Auto-refresh">
+          <input class="input" id="intervalInput" type="text" inputmode="numeric" placeholder="2s-60s">
+          <button class="btn secondary" id="applyInterval" type="button">Apply</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="grid" id="metaCards">
+      <div class="card stat">
+        <div class="label">Version</div>
+        <div class="value" id="version">—</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Description</div>
+        <div class="value" id="description">—</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Listen address</div>
+        <div class="value" id="listenAddress">—</div>
+      </div>
+    </section>
+
+    <section class="grid" style="margin-top: 16px;">
+      <div class="card stat">
+        <div class="label">Active interfaces</div>
+        <div class="value" id="activeCount">0</div>
+        <div class="subtle">Currently routed through WireGuard</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Excluded interfaces</div>
+        <div class="value" id="excludedCount">0</div>
+        <div class="subtle">Ignored by transmission</div>
+      </div>
+      <div class="card stat">
+        <div class="label">Inactive interfaces</div>
+        <div class="value" id="idleCount">0</div>
+        <div class="subtle">No recent traffic</div>
+      </div>
+    </section>
+
+    <section class="card" style="margin-top: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div>
+          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Interfaces</div>
+          <h3 style="margin:4px 0 0;">Real-time monitoring</h3>
+        </div>
+        <div class="badge">Sort by: <span id="sortLabel">name ↑</span></div>
+      </div>
+      <div class="interface-columns">
+        <div class="interface-box active">
+          <div class="box-header">
+            <div class="box-title">Active</div>
+            <span class="badge" id="activeBadge">0</span>
+          </div>
+          <div class="interface-list" id="activeList"></div>
+        </div>
+        <div class="interface-box inactive">
+          <div class="box-header">
+            <div class="box-title">Inactive</div>
+            <span class="badge" id="inactiveBadge">0</span>
+          </div>
+          <div class="interface-list" id="inactiveList"></div>
+        </div>
+        <div class="interface-box excluded">
+          <div class="box-header">
+            <div class="box-title">Excluded</div>
+            <span class="badge" id="excludedBadge">0</span>
+          </div>
+          <div class="interface-list" id="excludedList"></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <script>
+    const DEMO_MODE = new URLSearchParams(location.search).has('demo');
+    const state = {
+      data: null,
+      auto: true,
+      interval: 3000,
+      timer: null,
+      sort: { key: 'name', dir: 'asc' }
+    };
+
+    const qs = (id) => document.getElementById(id);
+    const themeToggle = qs('themeToggle');
+    const storedTheme = localStorage.getItem('engardeTheme');
+    const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initialTheme = storedTheme || (prefersDark ? 'dark' : 'light');
+
+    const applyTheme = (theme) => {
+      document.documentElement.dataset.theme = theme;
+      themeToggle.checked = theme === 'dark';
+      localStorage.setItem('engardeTheme', theme);
+    };
+
+    applyTheme(initialTheme);
+    themeToggle.addEventListener('change', () => {
+      applyTheme(themeToggle.checked ? 'dark' : 'light');
+    });
+    function humanizeLast(sec) {
+      if (sec === null || sec === undefined) return '—';
+      if (sec < 5) return 'just now';
+      if (sec < 60) return `${sec}s ago`;
+      const m = Math.floor(sec / 60);
+      if (m < 60) return `${m}m ago`;
+      const h = Math.floor(m / 60);
+      return `${h}h ago`;
+    }
+
+    async function apiFetch(path, opts = {}) {
+      const options = { headers: { 'Content-Type': 'application/json' }, ...opts };
+      const resp = await fetch(path, options);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      return resp.json();
+    }
+
+    async function fetchData() {
+      try {
+        const data = DEMO_MODE ? demoPayload() : await apiFetch('/api/v1/get-list');
+        state.data = data;
+        render();
+      } catch (err) {
+        console.warn('API error:', err.message);
+      }
+    }
+
+    function demoPayload() {
+      return {
+        type: 'client',
+        version: 'DEMO',
+        description: 'Offline example',
+        listenAddress: '0.0.0.0:4780',
+        wgMtu: 1420,
+        interfaces: [
+          { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2, trafficBps: 142342 },
+          { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
+          { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
+        ]
+      };
+    }
+
+    function renderMeta(data) {
+      qs('version').textContent = data.version || '—';
+      qs('description').textContent = data.description || '—';
+      const listen = data.listenAddress || '—';
+      const wgMtu = data.wgMtu ? ` MTU: ${data.wgMtu}` : '';
+      qs('listenAddress').textContent = `${listen}${wgMtu}`;
+    }
+
+    function renderCounts(list) {
+      const active = list.filter(i => i.status === 'active').length;
+      const excluded = list.filter(i => i.status === 'excluded').length;
+      const idle = list.filter(i => i.status === 'idle').length;
+      qs('activeCount').textContent = active;
+      qs('excludedCount').textContent = excluded;
+      qs('idleCount').textContent = idle;
+    }
+
+    function sortedAndFiltered(list) {
+      const { key, dir } = state.sort;
+      const mult = dir === 'asc' ? 1 : -1;
+      return list.slice().sort((a,b) => {
+        const av = a[key] ?? '';
+        const bv = b[key] ?? '';
+        if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * mult;
+        return av.toString().localeCompare(bv.toString()) * mult;
+      });
+    }
+
+    function formatTraffic(value) {
+      if (value === null || value === undefined) return '—';
+      if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB/s`;
+      if (value >= 1024) return `${(value / 1024).toFixed(1)} KB/s`;
+      return `${value} B/s`;
+    }
+
+    function renderInterfaceBoxes(list) {
+      const activeList = qs('activeList');
+      const inactiveList = qs('inactiveList');
+      const excludedList = qs('excludedList');
+      activeList.innerHTML = '';
+      inactiveList.innerHTML = '';
+      excludedList.innerHTML = '';
+
+      if (!list.length) {
+        const empty = '<div class="subtle" style="text-align:center; padding:24px;">No interfaces found</div>';
+        activeList.innerHTML = empty;
+        inactiveList.innerHTML = empty;
+        excludedList.innerHTML = empty;
+        qs('activeBadge').textContent = 0;
+        qs('inactiveBadge').textContent = 0;
+        qs('excludedBadge').textContent = 0;
+        return;
+      }
+
+      const statusLabels = {
+        active: 'Active',
+        idle: 'Inactive',
+        excluded: 'Excluded'
+      };
+
+      list.forEach(iface => {
+        const card = document.createElement('div');
+        card.className = 'iface-card';
+        const traffic = iface.status === 'active' ? `
+          <div class="iface-traffic">
+            <span class="label">Traffic</span>
+            <span class="value">${formatTraffic(iface.trafficBps)}</span>
+          </div>
+        ` : '';
+        card.innerHTML = `
+          <div class="row">
+            <div class="chip"><strong>${iface.name}</strong></div>
+            <span class="status ${iface.status}">${statusLabels[iface.status] || iface.status}</span>
+          </div>
+          <div class="row">
+            <span class="label">Sender</span>
+            <span class="value">${iface.senderAddress || '—'}</span>
+          </div>
+          <div class="row">
+            <span class="label">Destination</span>
+            <span class="value">${iface.dstAddress || '—'}</span>
+          </div>
+          <div class="row">
+            <span class="label">Last packet</span>
+            <span class="value">${humanizeLast(iface.last)}</span>
+          </div>
+          ${traffic}
+          <div class="iface-actions"></div>
+        `;
+        const actionRow = card.querySelector('.iface-actions');
+        const btn = document.createElement('button');
+        btn.className = 'btn ' + (iface.status === 'excluded' ? '' : 'danger');
+        btn.type = 'button';
+        btn.textContent = iface.status === 'excluded' ? 'Include' : 'Exclude';
+        btn.onclick = () => handleToggle(iface);
+        actionRow.appendChild(btn);
+
+        if (iface.status === 'active') {
+          activeList.appendChild(card);
+        } else if (iface.status === 'excluded') {
+          excludedList.appendChild(card);
+        } else {
+          inactiveList.appendChild(card);
+        }
+      });
+
+      qs('activeBadge').textContent = activeList.children.length || 0;
+      qs('inactiveBadge').textContent = inactiveList.children.length || 0;
+      qs('excludedBadge').textContent = excludedList.children.length || 0;
+    }
+
+    async function handleToggle(iface) {
+      try {
+        const path = iface.status === 'excluded' ? '/api/v1/include' : '/api/v1/exclude';
+        await apiFetch(path, { method: 'POST', body: JSON.stringify({ interface: iface.name }) });
+        fetchData();
+      } catch (err) {
+        alert(`Operation failed: ${err.message}`);
+      }
+    }
+
+    function render() {
+      if (!state.data) return;
+      renderMeta(state.data);
+      const all = state.data.interfaces || [];
+      renderCounts(all);
+      const list = sortedAndFiltered(all);
+      renderInterfaceBoxes(list);
+    }
+
+    function scheduleAutoRefresh() {
+      if (state.timer) clearInterval(state.timer);
+      if (!state.auto) return;
+      state.timer = setInterval(fetchData, state.interval);
+    }
+
+    // Event listeners
+    qs('applyInterval').onclick = () => {
+      const raw = qs('intervalInput').value.trim().toLowerCase().replace('s', '');
+      const value = Number.parseInt(raw, 10);
+      if (Number.isNaN(value) || value < 2 || value > 60) {
+        alert('Enter a valid value between 2s and 60s.');
+        return;
+      }
+      state.interval = value * 1000;
+      qs('intervalInput').value = `${value}s`;
+      scheduleAutoRefresh();
+    };
+
+    document.querySelectorAll('th[data-sort]').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.onclick = () => {
+        const key = th.dataset.sort;
+        if (state.sort.key === key) {
+          state.sort.dir = state.sort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          state.sort = { key, dir: 'asc' };
+        }
+        qs('sortLabel').textContent = `${key} ${state.sort.dir === 'asc' ? '↑' : '↓'}`;
+        render();
+      };
+    });
+
+    // Bootstrap
+    qs('intervalInput').value = `${state.interval / 1000}s`;
+    fetchData();
+    scheduleAutoRefresh();
+  </script>
+</body>
 </html>

@@ -31,6 +31,7 @@ PORT_ENGARDE=$((BASE_PORT + 1))
 PORT_GUI=$((BASE_PORT + 2))
 PORT_SSH=65522
 CLIENT_WG_IP="10.0.0.2/24"
+WG_MTU=""
 
 ENGARDE_GO_URL="https://engarde.linuxzogno.org/builds/master/linux/amd64/engarde-server"
 ENGARDE_RUST_URL="https://github.com/Brazzo978/engarde/releases/download/0.0.1/engarde_server"
@@ -54,6 +55,7 @@ enable_wireguard() {
   cat > "$WG_CFG" <<EOF
 [Interface]
 Address = 10.0.0.1/24
+MTU = $WG_MTU
 ListenPort = $PORT_WG
 PrivateKey = $(cat /etc/wireguard/server_private.key)
 PostUp = iptables -A FORWARD -i $(ip route show default | awk '/default/{print $5}') -o wg0 -j ACCEPT; \
@@ -236,6 +238,12 @@ if systemctl is-enabled --quiet engarde && [[ -f "$FLAG_FILE" ]]; then
 fi
 
 # First-time setup
+echo -e "\n== WireGuard MTU =="
+echo "Che MTU vuoi usare? (suggerito: 1320)"
+echo "Deve essere assolutamente uguale al client."
+read -rp "MTU: " WG_MTU
+WG_MTU=${WG_MTU:-1320}
+
 # Select Engarde server version
 echo -e "
 == Engarde Server Version =="

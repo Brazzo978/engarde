@@ -78,6 +78,13 @@ if [[ ! -f "$CONFIG_SCRIPT" ]]; then
 fi
 source "$CONFIG_SCRIPT"
 ENG_GUI_PORT=${ENG_LISTEN##*:}
+WG_MTU=""
+
+echo -e "\n== WireGuard MTU =="
+echo "Che MTU vuoi usare? (suggerito: 1320)"
+echo "Deve essere assolutamente uguale al server."
+read -rp "MTU: " WG_MTU
+WG_MTU=${WG_MTU:-1320}
 
 #-------------------------------------------------------------------------------
 # Install Engarde-client binary (one-time)
@@ -146,6 +153,7 @@ if ! systemctl list-unit-files | grep -q '^wg-quick@wg0.service'; then
 PrivateKey = $CLIENT_WG_PRIV
 Address     = ${CLIENT_WG_IP%%/*}/32
 DNS         = $DNS_SERVER
+MTU         = $WG_MTU
 
 [Peer]
 PublicKey  = $SERVER_WG_PUB

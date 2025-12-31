@@ -2,20 +2,31 @@ name: Build Rust binaries
 
 on:
   push:
+
     branches: [ "master" ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        target: ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "armv7-unknown-linux-gnueabihf"]
-        crate: ["Server", "Client"]
-    steps:
-      - uses: actions/checkout@v3
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - armv7-unknown-linux-gnueabihf
+        crate:
+          - Server
+          - Client
 
-      - uses: actions-rs/toolchain@v1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
         with:
           profile: minimal
           toolchain: stable
@@ -25,12 +36,18 @@ jobs:
       - name: Install cross
         run: cargo install cross --git https://github.com/cross-rs/cross --locked
 
-      - name: Build
+      - name: Build (${{ matrix.crate }} / ${{ matrix.target }})
         run: |
           cross build --release --target ${{ matrix.target }} --manifest-path Rust/${{ matrix.crate }}/Cargo.toml
+
+      - name: List release outputs
+        run: |
+          echo "== Release dir for ${{ matrix.crate }} / ${{ matrix.target }} =="
+          ls -lah Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.crate }}-${{ matrix.target }}
           path: Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/
+

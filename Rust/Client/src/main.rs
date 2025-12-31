@@ -1,18 +1,18 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::SocketAddr,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
 use if_addrs::get_if_addrs;
-use serde::{Deserialize, Serialize};
-use tokio::{net::UdpSocket, time};
-use tokio::sync::RwLock;
-use warp::Filter;
 use log::{info, warn};
-use rust_embed::RustEmbed;
 use mime_guess;
+use rust_embed::RustEmbed;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tokio::{net::UdpSocket, time};
+use warp::Filter;
 
 //
 // CONFIGURAZIONE
@@ -67,6 +67,9 @@ struct SendingRoutine {
     src_addr: String,
     dst_addr: SocketAddr,
     last_rec: Arc<Mutex<Instant>>,
+    bytes_total: Arc<Mutex<u64>>,
+    last_traffic_check: Arc<Mutex<Instant>>,
+    last_traffic_total: Arc<Mutex<u64>>,
     // Campo presente per compatibilità con Go
     is_closing: Arc<Mutex<bool>>,
 }
@@ -84,6 +87,7 @@ struct WebInterface {
     senderAddress: String,
     dstAddress: String,
     last: Option<u64>,
+    trafficBps: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -93,9 +97,11 @@ struct GetListResponse {
     description: String,
     listenAddress: String,
     interfaces: Vec<WebInterface>,
+    #[serde(rename = "wgMtu")]
+    wg_mtu: Option<u32>,
 }
 
-static VERSION: &str = "UNOFFICIAL BUILD";
+static VERSION: &str = "0.1.2";
 
 //
 // Custom rejection per Warp
@@ -193,6 +199,12 @@ fn interface_exists(ifname: &str) -> bool {
     false
 }
 
+fn read_interface_mtu(ifname: &str) -> Option<u32> {
+    let path = format!("/sys/class/net/{}/mtu", ifname);
+    let value = std::fs::read_to_string(path).ok()?;
+    value.trim().parse().ok()
+}
+
 //
 // Socket UDP
 //
@@ -237,6 +249,9 @@ async fn create_send_thread(
         src_addr: source_addr.to_string(),
         dst_addr,
         last_rec: Arc::new(Mutex::new(Instant::now())),
+        bytes_total: Arc::new(Mutex::new(0)),
+        last_traffic_check: Arc::new(Mutex::new(Instant::now())),
+        last_traffic_total: Arc::new(Mutex::new(0)),
         is_closing: Arc::new(Mutex::new(false)),
     };
     let routine_clone = routine.clone();
@@ -244,7 +259,10 @@ async fn create_send_thread(
     tokio::spawn(async move {
         wg_write_back(&ifname_owned, routine_clone, wg_sock, wg_addr).await;
     });
-    sending_channels.lock().unwrap().insert(ifname.to_string(), routine);
+    sending_channels
+        .lock()
+        .unwrap()
+        .insert(ifname.to_string(), routine);
 }
 
 async fn wg_write_back(
@@ -255,14 +273,22 @@ async fn wg_write_back(
 ) {
     let mut buf = vec![0u8; 1500];
     loop {
-        let n = match routine.src_sock.recv(&mut buf).await {
-            Ok(n) => n,
+        let (n, src_addr) = match routine.src_sock.recv_from(&mut buf).await {
+            Ok(res) => res,
             Err(e) => {
                 warn!("Error reading from interface {}: {}", ifname, e);
                 break;
             }
         };
+        if src_addr != routine.dst_addr {
+            warn!(
+                "Ignoring packet on interface {} from unexpected source {}",
+                ifname, src_addr
+            );
+            continue;
+        }
         *routine.last_rec.lock().unwrap() = Instant::now();
+        *routine.bytes_total.lock().unwrap() += n as u64;
         if let Some(addr) = *wg_addr.read().await {
             if let Err(e) = wg_sock.send_to(&buf[..n], addr).await {
                 warn!("Error writing to WireGuard: {}", e);
@@ -285,7 +311,10 @@ async fn update_available_interfaces(
             let keys: Vec<String> = channels.keys().cloned().collect();
             for ifname in keys {
                 if !interface_exists(&ifname) || is_excluded(&ifname, &cfg.excluded_interfaces) {
-                    info!("Interface '{}' not available or excluded, removing routine", ifname);
+                    info!(
+                        "Interface '{}' not available or excluded, removing routine",
+                        ifname
+                    );
                     channels.remove(&ifname);
                 } else if let Some(current_ip) = get_address_by_interface(&ifname) {
                     if current_ip != channels.get(&ifname).unwrap().src_addr {
@@ -343,10 +372,15 @@ async fn receive_from_wireguard(
         let sends = channels_snapshot.into_iter().map(|(ifname, routine)| {
             let src_sock = routine.src_sock.clone();
             let dst_addr = routine.dst_addr;
+            let bytes_total = routine.bytes_total.clone();
             let data = buf[..n].to_vec();
             async move {
                 let fut = src_sock.send_to(&data, dst_addr);
-                (ifname, tokio::time::timeout(write_timeout, fut).await)
+                let result = tokio::time::timeout(write_timeout, fut).await;
+                if matches!(result, Ok(Ok(_))) {
+                    *bytes_total.lock().unwrap() += data.len() as u64;
+                }
+                (ifname, result)
             }
         });
         let results = futures::future::join_all(sends).await;
@@ -397,22 +431,42 @@ async fn handle_get_list(
     let channels = sending_channels.lock().unwrap();
     let mut interfaces = Vec::new();
     let ifaces = get_if_addrs().unwrap_or_default();
+    let mut seen = HashSet::new();
     for iface in ifaces {
         let ifname = iface.name;
+        if !seen.insert(ifname.clone()) {
+            continue;
+        }
         let address = get_address_by_interface(&ifname).unwrap_or_else(|| "".to_string());
         let status;
         let dst = get_dst_by_ifname(&ifname, &cfg);
         let last;
+        let traffic_bps;
         if is_excluded(&ifname, &cfg.excluded_interfaces) {
             status = "excluded".to_string();
             last = None;
+            traffic_bps = None;
         } else if let Some(routine) = channels.get(&ifname) {
             status = "active".to_string();
-            let elapsed = now.duration_since(*routine.last_rec.lock().unwrap()).as_secs();
+            let elapsed = now
+                .duration_since(*routine.last_rec.lock().unwrap())
+                .as_secs();
             last = Some(elapsed);
+            let total = *routine.bytes_total.lock().unwrap();
+            let mut last_total = routine.last_traffic_total.lock().unwrap();
+            let mut last_check = routine.last_traffic_check.lock().unwrap();
+            let delta = total.saturating_sub(*last_total);
+            let elapsed_seconds = now
+                .duration_since(*last_check)
+                .as_secs_f64()
+                .max(0.5);
+            traffic_bps = Some((delta as f64 / elapsed_seconds) as u64);
+            *last_total = total;
+            *last_check = now;
         } else {
             status = "idle".to_string();
             last = None;
+            traffic_bps = None;
         }
         interfaces.push(WebInterface {
             name: ifname,
@@ -420,6 +474,7 @@ async fn handle_get_list(
             senderAddress: address,
             dstAddress: dst,
             last,
+            trafficBps: traffic_bps,
         });
     }
     let response = GetListResponse {
@@ -428,11 +483,14 @@ async fn handle_get_list(
         description: cfg.description.unwrap_or_default(),
         listenAddress: cfg.listen_addr,
         interfaces,
+        wg_mtu: read_interface_mtu("wg0"),
     };
     Ok(warp::reply::json(&response))
 }
 
-async fn handle_swap_exclusion(body: serde_json::Value) -> Result<impl warp::Reply, warp::Rejection> {
+async fn handle_swap_exclusion(
+    body: serde_json::Value,
+) -> Result<impl warp::Reply, warp::Rejection> {
     if let Some(iface) = body.get("interface").and_then(|v| v.as_str()) {
         swap_exclusion(iface);
         let resp = serde_json::json!({ "status": "ok" });
@@ -538,11 +596,13 @@ async fn main() {
     env_logger::init();
 
     // Legge la configurazione (default "engarde.yml")
-    let config_path = std::env::args().nth(1).unwrap_or_else(|| "engarde.yml".to_string());
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "engarde.yml".to_string());
     let config_str = std::fs::read_to_string(&config_path)
         .unwrap_or_else(|e| panic!("Error reading {}: {}", config_path, e));
-    let config: Config = serde_yaml::from_str(&config_str)
-        .unwrap_or_else(|e| panic!("Error parsing config: {}", e));
+    let config: Config =
+        serde_yaml::from_str(&config_str).unwrap_or_else(|e| panic!("Error parsing config: {}", e));
     let cfg = config.client.clone();
 
     if cfg.listen_addr.is_empty() {
@@ -583,7 +643,13 @@ async fn main() {
     let wg_sock_clone = wg_sock.clone();
     let wg_addr_clone = wg_addr.clone();
     tokio::spawn(async move {
-        update_available_interfaces(wg_sock_clone, wg_addr_clone, sending_channels_clone, cfg_clone).await;
+        update_available_interfaces(
+            wg_sock_clone,
+            wg_addr_clone,
+            sending_channels_clone,
+            cfg_clone,
+        )
+        .await;
     });
 
     receive_from_wireguard(wg_sock, sending_channels, wg_addr, write_timeout).await;
