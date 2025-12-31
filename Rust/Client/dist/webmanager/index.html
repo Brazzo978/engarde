@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="it">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -127,25 +127,25 @@
     <header>
       <div class="title">engarde web manager <span class="pill">NG-UI</span></div>
       <div class="header-actions">
-        <label class="switch" aria-label="Attiva tema scuro">
+        <label class="switch" aria-label="Enable dark theme">
           <input type="checkbox" id="themeToggle">
           <span class="toggle"></span>
-          <span>Tema scuro</span>
+          <span>Dark theme</span>
         </label>
         <div class="header-refresh" aria-label="Auto-refresh">
           <input class="input" id="intervalInput" type="text" inputmode="numeric" placeholder="2s-60s">
-          <button class="btn secondary" id="applyInterval" type="button">Applica</button>
+          <button class="btn secondary" id="applyInterval" type="button">Apply</button>
         </div>
       </div>
     </header>
 
     <section class="grid" id="metaCards">
       <div class="card stat">
-        <div class="label">Versione</div>
+        <div class="label">Version</div>
         <div class="value" id="version">—</div>
       </div>
       <div class="card stat">
-        <div class="label">Descrizione</div>
+        <div class="label">Description</div>
         <div class="value" id="description">—</div>
       </div>
       <div class="card stat">
@@ -156,29 +156,29 @@
 
     <section class="grid" style="margin-top: 16px;">
       <div class="card stat">
-        <div class="label">Interfacce attive</div>
+        <div class="label">Active interfaces</div>
         <div class="value" id="activeCount">0</div>
-        <div class="subtle">Attualmente instradate verso WireGuard</div>
+        <div class="subtle">Currently routed through WireGuard</div>
       </div>
       <div class="card stat">
-        <div class="label">Interfacce escluse</div>
+        <div class="label">Excluded interfaces</div>
         <div class="value" id="excludedCount">0</div>
-        <div class="subtle">Ignorate dalla trasmissione</div>
+        <div class="subtle">Ignored by transmission</div>
       </div>
       <div class="card stat">
-        <div class="label">Interfacce inattive</div>
+        <div class="label">Inactive interfaces</div>
         <div class="value" id="idleCount">0</div>
-        <div class="subtle">Nessun traffico recente</div>
+        <div class="subtle">No recent traffic</div>
       </div>
     </section>
 
     <section class="card" style="margin-top: 16px;">
       <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
         <div>
-          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Interfacce</div>
-          <h3 style="margin:4px 0 0;">Monitoraggio in tempo reale</h3>
+          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Interfaces</div>
+          <h3 style="margin:4px 0 0;">Real-time monitoring</h3>
         </div>
-        <div class="badge">Ordina per: <span id="sortLabel">nome ↑</span></div>
+        <div class="badge">Sort by: <span id="sortLabel">name ↑</span></div>
       </div>
       <div class="interface-columns">
         <div class="interface-box active">
@@ -235,12 +235,12 @@
     });
     function humanizeLast(sec) {
       if (sec === null || sec === undefined) return '—';
-      if (sec < 5) return 'adesso';
-      if (sec < 60) return `${sec}s fa`;
+      if (sec < 5) return 'just now';
+      if (sec < 60) return `${sec}s ago`;
       const m = Math.floor(sec / 60);
-      if (m < 60) return `${m}m fa`;
+      if (m < 60) return `${m}m ago`;
       const h = Math.floor(m / 60);
-      return `${h}h fa`;
+      return `${h}h ago`;
     }
 
     async function apiFetch(path, opts = {}) {
@@ -256,7 +256,7 @@
         state.data = data;
         render();
       } catch (err) {
-        console.warn('Errore API:', err.message);
+        console.warn('API error:', err.message);
       }
     }
 
@@ -264,7 +264,7 @@
       return {
         type: 'client',
         version: 'DEMO',
-        description: 'Esempio offline',
+        description: 'Offline example',
         listenAddress: '0.0.0.0:4780',
         wgMtu: 1420,
         interfaces: [
@@ -319,7 +319,7 @@
       excludedList.innerHTML = '';
 
       if (!list.length) {
-        const empty = '<div class="subtle" style="text-align:center; padding:24px;">Nessuna interfaccia trovata</div>';
+        const empty = '<div class="subtle" style="text-align:center; padding:24px;">No interfaces found</div>';
         activeList.innerHTML = empty;
         inactiveList.innerHTML = empty;
         excludedList.innerHTML = empty;
@@ -354,11 +354,11 @@
             <span class="value">${iface.senderAddress || '—'}</span>
           </div>
           <div class="row">
-            <span class="label">Destinazione</span>
+            <span class="label">Destination</span>
             <span class="value">${iface.dstAddress || '—'}</span>
           </div>
           <div class="row">
-            <span class="label">Ultimo pacchetto</span>
+            <span class="label">Last packet</span>
             <span class="value">${humanizeLast(iface.last)}</span>
           </div>
           ${traffic}
@@ -368,7 +368,7 @@
         const btn = document.createElement('button');
         btn.className = 'btn ' + (iface.status === 'excluded' ? '' : 'danger');
         btn.type = 'button';
-        btn.textContent = iface.status === 'excluded' ? 'Includi' : 'Escludi';
+        btn.textContent = iface.status === 'excluded' ? 'Include' : 'Exclude';
         btn.onclick = () => handleToggle(iface);
         actionRow.appendChild(btn);
 
@@ -392,7 +392,7 @@
         await apiFetch(path, { method: 'POST', body: JSON.stringify({ interface: iface.name }) });
         fetchData();
       } catch (err) {
-        alert(`Operazione non riuscita: ${err.message}`);
+        alert(`Operation failed: ${err.message}`);
       }
     }
 
@@ -416,7 +416,7 @@
       const raw = qs('intervalInput').value.trim().toLowerCase().replace('s', '');
       const value = Number.parseInt(raw, 10);
       if (Number.isNaN(value) || value < 2 || value > 60) {
-        alert('Inserisci un valore valido tra 2s e 60s.');
+        alert('Enter a valid value between 2s and 60s.');
         return;
       }
       state.interval = value * 1000;
