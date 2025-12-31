@@ -2,7 +2,8 @@ name: Build Rust binaries
 
 on:
   push:
-    branches: [ "Test" ]
+
+    branches: [ "master" ]
   pull_request:
   workflow_dispatch:
 
@@ -49,4 +50,4 @@ jobs:
         with:
           name: ${{ matrix.crate }}-${{ matrix.target }}
           path: Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/
-          if-no-files-found: error
+
