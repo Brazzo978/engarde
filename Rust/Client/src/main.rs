@@ -1,6 +1,7 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     net::SocketAddr,
+    process::Stdio,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -10,6 +11,8 @@ use log::{info, warn};
 use mime_guess;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
 use tokio::sync::RwLock;
 use tokio::{net::UdpSocket, time};
 use warp::Filter;
@@ -102,6 +105,9 @@ struct GetListResponse {
 }
 
 static VERSION: &str = "0.1.2";
+const PING_INTERVAL_MS: u64 = 250;
+const PING_WINDOW_SECS: u64 = 180;
+const MAX_PING_SAMPLES: usize = (PING_WINDOW_SECS * 1000 / PING_INTERVAL_MS) as usize;
 
 //
 // Custom rejection per Warp
@@ -110,6 +116,122 @@ static VERSION: &str = "0.1.2";
 #[derive(Debug)]
 struct CustomReject;
 impl warp::reject::Reject for CustomReject {}
+
+//
+// Ping monitoring
+//
+
+#[derive(Clone)]
+struct PingState {
+    target: String,
+    interval_ms: u64,
+    window_ms: u64,
+    samples: VecDeque<Option<f64>>,
+}
+
+impl PingState {
+    fn new(target: String) -> Self {
+        Self {
+            target,
+            interval_ms: PING_INTERVAL_MS,
+            window_ms: PING_WINDOW_SECS * 1000,
+            samples: VecDeque::with_capacity(MAX_PING_SAMPLES),
+        }
+    }
+
+    fn push_sample(&mut self, sample: Option<f64>) {
+        if self.samples.len() >= MAX_PING_SAMPLES {
+            self.samples.pop_front();
+        }
+        self.samples.push_back(sample);
+    }
+}
+
+type SharedPingState = Arc<Mutex<PingState>>;
+
+#[derive(Serialize)]
+struct PingStatsResponse {
+    target: String,
+    #[serde(rename = "intervalMs")]
+    interval_ms: u64,
+    #[serde(rename = "windowMs")]
+    window_ms: u64,
+    samples: Vec<Option<f64>>,
+    sent: u64,
+    lost: u64,
+    #[serde(rename = "lossPercent")]
+    loss_percent: f64,
+    #[serde(rename = "minMs")]
+    min_ms: Option<f64>,
+    #[serde(rename = "maxMs")]
+    max_ms: Option<f64>,
+    #[serde(rename = "avgMs")]
+    avg_ms: Option<f64>,
+}
+
+fn ping_target_from_dst(dst: &str) -> String {
+    if let Ok(addr) = dst.parse::<SocketAddr>() {
+        return addr.ip().to_string();
+    }
+    dst.split(':').next().unwrap_or(dst).to_string()
+}
+
+fn parse_ping_line(line: &str) -> Option<Option<f64>> {
+    if !line.contains("icmp_seq=") {
+        return None;
+    }
+    if let Some(pos) = line.find("time=") {
+        let start = pos + "time=".len();
+        let rest = &line[start..];
+        let end = rest.find(" ms").unwrap_or(rest.len());
+        if let Ok(value) = rest[..end].trim().parse::<f64>() {
+            return Some(Some(value));
+        }
+        return Some(None);
+    }
+    Some(None)
+}
+
+async fn run_ping_process(
+    target: &str,
+    ping_state: SharedPingState,
+) -> Result<(), std::io::Error> {
+    let interval = format!("{:.2}", PING_INTERVAL_MS as f64 / 1000.0);
+    let mut command = Command::new("ping");
+    command
+        .arg("-n")
+        .arg("-O")
+        .arg("-i")
+        .arg(interval)
+        .arg("-I")
+        .arg("wg0")
+        .arg(target)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command.spawn()?;
+    if let Some(stdout) = child.stdout.take() {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await? {
+            if let Some(sample) = parse_ping_line(&line) {
+                let mut state = ping_state.lock().unwrap();
+                state.push_sample(sample);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn spawn_ping_task(target: String, ping_state: SharedPingState) {
+    tokio::spawn(async move {
+        loop {
+            match run_ping_process(&target, ping_state.clone()).await {
+                Ok(()) => warn!("Ping process exited, restarting."),
+                Err(e) => warn!("Ping process error: {}", e),
+            }
+            time::sleep(Duration::from_secs(1)).await;
+        }
+    });
+}
 
 //
 // Gestione delle esclusioni
@@ -536,10 +658,62 @@ async fn handle_exclude(body: serde_json::Value) -> Result<impl warp::Reply, war
     }
 }
 
+async fn handle_ping_stats(
+    ping_state: SharedPingState,
+) -> Result<impl warp::Reply, warp::Rejection> {
+    let state = ping_state.lock().unwrap();
+    let samples: Vec<Option<f64>> = state.samples.iter().copied().collect();
+    let mut min_ms: Option<f64> = None;
+    let mut max_ms: Option<f64> = None;
+    let mut sum = 0.0;
+    let mut count = 0u64;
+    let mut lost = 0u64;
+    for sample in &samples {
+        if let Some(value) = sample {
+            min_ms = Some(min_ms.map_or(*value, |v| v.min(*value)));
+            max_ms = Some(max_ms.map_or(*value, |v| v.max(*value)));
+            sum += value;
+            count += 1;
+        } else {
+            lost += 1;
+        }
+    }
+    let sent = samples.len() as u64;
+    let loss_percent = if sent > 0 {
+        (lost as f64 / sent as f64) * 100.0
+    } else {
+        0.0
+    };
+    let avg_ms = if count > 0 {
+        Some(sum / count as f64)
+    } else {
+        None
+    };
+    let response = PingStatsResponse {
+        target: state.target.clone(),
+        interval_ms: state.interval_ms,
+        window_ms: state.window_ms,
+        samples,
+        sent,
+        lost,
+        loss_percent,
+        min_ms,
+        max_ms,
+        avg_ms,
+    };
+    Ok(warp::reply::json(&response))
+}
+
 fn with_sending_channels(
     sending_channels: SendingChannels,
 ) -> impl Filter<Extract = (SendingChannels,), Error = std::convert::Infallible> + Clone {
     warp::any().map(move || sending_channels.clone())
+}
+
+fn with_ping_state(
+    ping_state: SharedPingState,
+) -> impl Filter<Extract = (SharedPingState,), Error = std::convert::Infallible> + Clone {
+    warp::any().map(move || ping_state.clone())
 }
 
 fn with_client_config(
@@ -553,12 +727,16 @@ async fn run_webserver(
     web_cfg: WebManagerConfig,
     sending_channels: SendingChannels,
     cfg: ClientConfig,
+    ping_state: SharedPingState,
 ) {
     let static_route = warp::path::tail().and_then(serve_embedded_file);
     let get_list_route = warp::path!("api" / "v1" / "get-list")
         .and(with_sending_channels(sending_channels.clone()))
         .and(with_client_config(cfg.clone()))
         .and_then(handle_get_list);
+    let ping_stats_route = warp::path!("api" / "v1" / "ping-stats")
+        .and(with_ping_state(ping_state))
+        .and_then(handle_ping_stats);
     let swap_exclusion_route = warp::path!("api" / "v1" / "swap-exclusion")
         .and(warp::post())
         .and(warp::body::json())
@@ -576,6 +754,7 @@ async fn run_webserver(
         .and_then(handle_exclude);
 
     let routes = get_list_route
+        .or(ping_stats_route)
         .or(swap_exclusion_route)
         .or(reset_exclusions_route)
         .or(include_route)
@@ -633,8 +812,18 @@ async fn main() {
         let listen = web.listen_addr.clone();
         let sending_channels_clone = sending_channels.clone();
         let cfg_clone = cfg.clone();
+        let ping_target = ping_target_from_dst(&cfg.dst_addr);
+        let ping_state = Arc::new(Mutex::new(PingState::new(ping_target)));
+        spawn_ping_task(ping_state.lock().unwrap().target.clone(), ping_state.clone());
         tokio::spawn(async move {
-            run_webserver(&listen, web, sending_channels_clone, cfg_clone).await;
+            run_webserver(
+                &listen,
+                web,
+                sending_channels_clone,
+                cfg_clone,
+                ping_state,
+            )
+            .await;
         });
     }
 
