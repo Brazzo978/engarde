@@ -114,11 +114,24 @@
     .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border); }
 
     .badge { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted); }
+    .ping-section { display: grid; gap: 16px; }
+    .ping-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .ping-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 320px); gap: 16px; }
+    .ping-chart { position: relative; border-radius: 14px; border: 1px solid var(--border); background: rgba(0,0,0,0.12); padding: 14px; min-height: 220px; }
+    .ping-chart canvas { width: 100%; height: 100%; display: block; }
+    .ping-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+    .ping-tooltip { position: absolute; pointer-events: none; padding: 8px 10px; border-radius: 10px; background: rgba(10,15,28,0.92); border: 1px solid rgba(255,255,255,0.12); color: var(--text); font-size: 12px; box-shadow: var(--shadow); transform: translate(-50%, -120%); opacity: 0; transition: opacity .1s ease; white-space: nowrap; }
+    :root[data-theme="light"] .ping-tooltip { background: rgba(244,247,251,0.95); }
+    .ping-stats { display: grid; gap: 10px; }
+    .ping-stat { border-radius: 12px; border: 1px solid var(--border); background: var(--panel); padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .ping-stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    .ping-stat strong { font-size: 18px; font-weight: 700; }
 
     @media (max-width: 700px) {
       header { flex-direction: column; align-items: flex-start; }
       .controls { grid-template-columns: 1fr; }
       th:nth-child(3), td:nth-child(3), th:nth-child(5), td:nth-child(5) { display: none; }
+      .ping-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -205,6 +218,31 @@
       </div>
     </section>
 
+    <section class="card ping-section" style="margin-top: 16px;">
+      <div class="ping-header">
+        <div>
+          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">WireGuard ping</div>
+          <h3 style="margin:4px 0 0;">Tunnel health (last 3 min)</h3>
+        </div>
+        <div class="chip">Target: <span id="pingTarget">—</span></div>
+      </div>
+      <div class="ping-grid">
+        <div class="ping-chart">
+          <canvas id="pingChart"></canvas>
+          <div class="ping-overlay" id="pingEmpty">Waiting for samples…</div>
+          <div class="ping-tooltip" id="pingTooltip"></div>
+        </div>
+        <div class="ping-stats">
+          <div class="ping-stat"><span>Avg ping</span><strong id="pingAvg">—</strong></div>
+          <div class="ping-stat"><span>Min ping</span><strong id="pingMin">—</strong></div>
+          <div class="ping-stat"><span>Max ping</span><strong id="pingMax">—</strong></div>
+          <div class="ping-stat"><span>Packet loss</span><strong id="pingLoss">—</strong></div>
+          <div class="ping-stat"><span>Lost packets</span><strong id="pingLost">—</strong></div>
+        </div>
+      </div>
+      <div class="subtle">Sampling every 250ms • Rolling window of 3 minutes</div>
+    </section>
+
   </div>
 
   <script>
@@ -214,10 +252,14 @@
       auto: true,
       interval: 3000,
       timer: null,
+      pingTimer: null,
       sort: { key: 'name', dir: 'asc' }
     };
 
     const qs = (id) => document.getElementById(id);
+    const pingCanvas = qs('pingChart');
+    const pingEmpty = qs('pingEmpty');
+    const pingTooltip = qs('pingTooltip');
     const themeToggle = qs('themeToggle');
     const storedTheme = localStorage.getItem('engardeTheme');
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -260,6 +302,17 @@
       }
     }
 
+    async function fetchPing() {
+      try {
+        const data = DEMO_MODE ? demoPing() : await apiFetch('/api/v1/ping-stats');
+        state.ping = data;
+        state.pingFetchedAt = Date.now();
+        renderPing();
+      } catch (err) {
+        console.warn('Ping API error:', err.message);
+      }
+    }
+
     function demoPayload() {
       return {
         type: 'client',
@@ -272,6 +325,30 @@
           { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
           { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
         ]
+      };
+    }
+
+    function demoPing() {
+      const samples = Array.from({ length: 720 }, (_, idx) => {
+        if (Math.random() < 0.03) return null;
+        return 22 + Math.sin(idx / 18) * 6 + Math.random() * 4;
+      });
+      const values = samples.filter(v => v !== null);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const avg = values.reduce((acc, v) => acc + v, 0) / values.length;
+      const lost = samples.filter(v => v === null).length;
+      return {
+        target: '10.0.0.1',
+        intervalMs: 250,
+        windowMs: 180000,
+        samples,
+        sent: samples.length,
+        lost,
+        lossPercent: (lost / samples.length) * 100,
+        minMs: min,
+        maxMs: max,
+        avgMs: avg
       };
     }
 
@@ -405,10 +482,147 @@
       renderInterfaceBoxes(list);
     }
 
+    function renderPing() {
+      if (!state.ping) return;
+      const data = state.ping;
+      qs('pingTarget').textContent = data.target || '—';
+      qs('pingAvg').textContent = formatPingValue(data.avgMs);
+      qs('pingMin').textContent = formatPingValue(data.minMs);
+      qs('pingMax').textContent = formatPingValue(data.maxMs);
+      qs('pingLoss').textContent = data.lossPercent !== undefined ? `${data.lossPercent.toFixed(1)}%` : '—';
+      qs('pingLost').textContent = data.sent ? `${data.lost}/${data.sent}` : '—';
+      drawPingChart(data.samples || []);
+    }
+
+    function formatPingValue(value) {
+      if (value === null || value === undefined || Number.isNaN(value)) return '—';
+      return `${value.toFixed(1)} ms`;
+    }
+
+    function drawPingChart(samples) {
+      const canvas = pingCanvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      if (!samples.length) {
+        pingEmpty.style.display = 'flex';
+        pingEmpty.textContent = 'Waiting for samples…';
+        pingTooltip.style.opacity = 0;
+        return;
+      }
+
+      const values = samples.filter(v => v !== null && v !== undefined);
+      if (!values.length) {
+        pingEmpty.style.display = 'flex';
+        pingEmpty.textContent = 'No replies yet';
+        pingTooltip.style.opacity = 0;
+        return;
+      }
+
+      pingEmpty.style.display = 'none';
+      pingTooltip.style.opacity = 0;
+
+      const padding = 16;
+      const width = rect.width - padding * 2;
+      const height = rect.height - padding * 2;
+      const max = Math.max(...values);
+      const min = Math.min(...values);
+      const range = max - min || 1;
+      const step = width / Math.max(samples.length - 1, 1);
+      const yFor = (value) => padding + (max - value) / range * height;
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (height / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(padding + width, y);
+        ctx.stroke();
+      }
+
+      const gradient = ctx.createLinearGradient(0, padding, 0, padding + height);
+      gradient.addColorStop(0, 'rgba(122,224,255,0.85)');
+      gradient.addColorStop(1, 'rgba(122,224,255,0.12)');
+      ctx.strokeStyle = gradient;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      let started = false;
+      samples.forEach((value, idx) => {
+        if (value === null || value === undefined) {
+          started = false;
+          return;
+        }
+        const x = padding + step * idx;
+        const y = yFor(value);
+        if (!started) {
+          ctx.moveTo(x, y);
+          started = true;
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+
+      ctx.strokeStyle = 'rgba(255,107,107,0.7)';
+      ctx.lineWidth = 1;
+      samples.forEach((value, idx) => {
+        if (value !== null && value !== undefined) return;
+        const x = padding + step * idx;
+        ctx.beginPath();
+        ctx.moveTo(x, padding);
+        ctx.lineTo(x, padding + height);
+        ctx.stroke();
+      });
+    }
+
+    function formatTimestamp(timestampMs) {
+      const date = new Date(timestampMs);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    function bindPingTooltip() {
+      if (!pingCanvas) return;
+      pingCanvas.addEventListener('mouseleave', () => {
+        pingTooltip.style.opacity = 0;
+      });
+      pingCanvas.addEventListener('mousemove', (event) => {
+        if (!state.ping || !state.ping.samples?.length) return;
+        const rect = pingCanvas.getBoundingClientRect();
+        const padding = 16;
+        const width = rect.width - padding * 2;
+        const x = Math.min(Math.max(event.clientX - rect.left - padding, 0), width);
+        const step = width / Math.max(state.ping.samples.length - 1, 1);
+        const idx = Math.round(x / step);
+        const sample = state.ping.samples[idx];
+        const interval = state.ping.intervalMs || 250;
+        const deltaMs = (state.ping.samples.length - 1 - idx) * interval;
+        const baseTime = state.pingFetchedAt || Date.now();
+        const timestamp = baseTime - deltaMs;
+        const labelTime = formatTimestamp(timestamp);
+        const labelValue = sample === null || sample === undefined ? 'loss' : `${sample.toFixed(1)} ms`;
+        pingTooltip.textContent = `${labelTime} • ${labelValue}`;
+        pingTooltip.style.left = `${padding + idx * step}px`;
+        pingTooltip.style.top = `${padding}px`;
+        pingTooltip.style.opacity = 1;
+      });
+    }
+
     function scheduleAutoRefresh() {
       if (state.timer) clearInterval(state.timer);
       if (!state.auto) return;
       state.timer = setInterval(fetchData, state.interval);
+    }
+
+    function schedulePingRefresh() {
+      if (state.pingTimer) clearInterval(state.pingTimer);
+      state.pingTimer = setInterval(fetchPing, 1000);
     }
 
     // Event listeners
@@ -442,6 +656,12 @@
     qs('intervalInput').value = `${state.interval / 1000}s`;
     fetchData();
     scheduleAutoRefresh();
+    fetchPing();
+    schedulePingRefresh();
+    window.addEventListener('resize', () => {
+      if (state.ping?.samples) drawPingChart(state.ping.samples);
+    });
+    bindPingTooltip();
   </script>
 </body>
 </html>
