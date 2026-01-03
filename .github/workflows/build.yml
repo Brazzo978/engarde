@@ -40,40 +40,12 @@ jobs:
         run: |
           cross build --release --target ${{ matrix.target }} --manifest-path Rust/${{ matrix.crate }}/Cargo.toml
 
-      - name: Collect binary (only)
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          RELDIR="Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release"
-          OUTDIR="dist/${{ matrix.crate }}/${{ matrix.target }}"
-          mkdir -p "$OUTDIR"
-
-          # bin name = crate folder name lowercased (Server->server, Client->client)
-          BIN="$(echo "${{ matrix.crate }}" | tr '[:upper:]' '[:lower:]')"
-
-          # alcuni progetti usano underscore: nome-con-trattini ecc. (fallback)
-          BIN2="${BIN//-/_}"
-
-          echo "Release dir: $RELDIR"
-          ls -lah "$RELDIR" || true
-
-          if [ -f "$RELDIR/$BIN" ]; then
-            cp -v "$RELDIR/$BIN" "$OUTDIR/"
-          elif [ -f "$RELDIR/$BIN2" ]; then
-            cp -v "$RELDIR/$BIN2" "$OUTDIR/"
-          else
-            echo "❌ Binario non trovato. Cercavo: $RELDIR/$BIN (o $BIN2)"
-            exit 1
-          fi
-
-          echo "== Collected =="
-          ls -lah "$OUTDIR"
-
-      - name: Upload artifact (binaries only)
+      - name: Upload artifact (release dir)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.crate }}-${{ matrix.target }}-bin
-          path: dist/${{ matrix.crate }}/${{ matrix.target }}/*
+          name: ${{ matrix.crate }}-${{ matrix.target }}-release
+          path: |
+            Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/**
+            Rust/${{ matrix.crate }}/target/release/**
           if-no-files-found: error
           retention-days: 7
