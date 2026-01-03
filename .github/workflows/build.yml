@@ -2,9 +2,9 @@ name: Build Rust binaries
 
 on:
   push:
-
-    branches: [ "master" ]
+    branches: [ "master", "test" ]
   pull_request:
+    branches: [ "master", "test" ]
   workflow_dispatch:
 
 jobs:
@@ -23,7 +23,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -40,14 +40,40 @@ jobs:
         run: |
           cross build --release --target ${{ matrix.target }} --manifest-path Rust/${{ matrix.crate }}/Cargo.toml
 
-      - name: List release outputs
+      - name: Collect binary (only)
+        shell: bash
         run: |
-          echo "== Release dir for ${{ matrix.crate }} / ${{ matrix.target }} =="
-          ls -lah Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/ || true
+          set -euo pipefail
 
-      - name: Upload artifact
+          RELDIR="Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release"
+          OUTDIR="dist/${{ matrix.crate }}/${{ matrix.target }}"
+          mkdir -p "$OUTDIR"
+
+          # bin name = crate folder name lowercased (Server->server, Client->client)
+          BIN="$(echo "${{ matrix.crate }}" | tr '[:upper:]' '[:lower:]')"
+
+          # alcuni progetti usano underscore: nome-con-trattini ecc. (fallback)
+          BIN2="${BIN//-/_}"
+
+          echo "Release dir: $RELDIR"
+          ls -lah "$RELDIR" || true
+
+          if [ -f "$RELDIR/$BIN" ]; then
+            cp -v "$RELDIR/$BIN" "$OUTDIR/"
+          elif [ -f "$RELDIR/$BIN2" ]; then
+            cp -v "$RELDIR/$BIN2" "$OUTDIR/"
+          else
+            echo "❌ Binario non trovato. Cercavo: $RELDIR/$BIN (o $BIN2)"
+            exit 1
+          fi
+
+          echo "== Collected =="
+          ls -lah "$OUTDIR"
+
+      - name: Upload artifact (binaries only)
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.crate }}-${{ matrix.target }}
-          path: Rust/${{ matrix.crate }}/target/${{ matrix.target }}/release/
-
+          name: ${{ matrix.crate }}-${{ matrix.target }}-bin
+          path: dist/${{ matrix.crate }}/${{ matrix.target }}/*
+          if-no-files-found: error
+          retention-days: 7
