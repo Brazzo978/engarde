@@ -2,9 +2,9 @@ name: Build Rust binaries
 
 on:
   push:
-    branches: [ "master", "test" ]
+    branches: [ "master", "Test" ]
   pull_request:
-    branches: [ "master", "test" ]
+    branches: [ "master", "Test" ]
   workflow_dispatch:
 
 jobs:
