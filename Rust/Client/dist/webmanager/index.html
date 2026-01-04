@@ -126,6 +126,22 @@
     .ping-stat { border-radius: 12px; border: 1px solid var(--border); background: var(--panel); padding: 12px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .ping-stat span { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     .ping-stat strong { font-size: 18px; font-weight: 700; }
+    .metrics-panel { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: flex-end; }
+    .metric-toggle { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); font-size: 12px; cursor: pointer; }
+    .metric-toggle input { margin: 0; }
+    .metric-swatch { width: 10px; height: 10px; border-radius: 50%; background: var(--swatch, var(--accent)); display: inline-block; }
+    .traffic-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+    .traffic-chart { position: relative; border-radius: 14px; border: 1px solid var(--border); background: rgba(0,0,0,0.12); padding: 14px; min-height: 220px; }
+    .traffic-chart canvas { width: 100%; height: 100%; display: block; }
+    .traffic-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+    .traffic-tooltip { position: absolute; pointer-events: none; padding: 8px 10px; border-radius: 10px; background: rgba(10,15,28,0.92); border: 1px solid rgba(255,255,255,0.12); color: var(--text); font-size: 12px; box-shadow: var(--shadow); transform: translate(-50%, -120%); opacity: 0; transition: opacity .1s ease; white-space: nowrap; }
+    :root[data-theme="light"] .traffic-tooltip { background: rgba(244,247,251,0.95); }
+    .traffic-log { display: grid; gap: 8px; }
+    .log-list { display: grid; gap: 8px; max-height: 220px; overflow-y: auto; padding-right: 6px; }
+    .log-entry { border-radius: 12px; border: 1px solid var(--border); background: var(--panel); padding: 10px 12px; display: grid; gap: 6px; font-size: 12px; }
+    .log-entry .log-time { font-weight: 700; color: var(--text); }
+    .log-entry .log-line { color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px; }
+    .log-chip { border-radius: 999px; padding: 2px 8px; border: 1px solid var(--border); background: rgba(255,255,255,0.04); color: var(--text); }
 
     @media (max-width: 700px) {
       header { flex-direction: column; align-items: flex-start; }
@@ -224,7 +240,19 @@
           <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">WireGuard ping</div>
           <h3 style="margin:4px 0 0;">Tunnel health (last 3 min)</h3>
         </div>
-        <div class="chip">Target: <span id="pingTarget">—</span></div>
+        <div class="metrics-panel" id="pingMetricsPanel">
+          <label class="metric-toggle">
+            <input type="checkbox" data-metric="latency" checked>
+            <span class="metric-swatch" style="--swatch: rgba(122,224,255,0.9);"></span>
+            Latency
+          </label>
+          <label class="metric-toggle">
+            <input type="checkbox" data-metric="loss" checked>
+            <span class="metric-swatch" style="--swatch: rgba(255,107,107,0.8);"></span>
+            Loss markers
+          </label>
+          <div class="chip">Target: <span id="pingTarget">—</span></div>
+        </div>
       </div>
       <div class="ping-grid">
         <div class="ping-chart">
@@ -243,6 +271,27 @@
       <div class="subtle">Sampling every 250ms • Rolling window of 3 minutes</div>
     </section>
 
+    <section class="card traffic-section" style="margin-top: 16px;">
+      <div class="ping-header">
+        <div>
+          <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Throughput</div>
+          <h3 style="margin:4px 0 0;">Connection speeds (last 3 min)</h3>
+        </div>
+        <div class="metrics-panel" id="trafficMetrics"></div>
+      </div>
+      <div class="traffic-grid">
+        <div class="traffic-chart">
+          <canvas id="trafficChart"></canvas>
+          <div class="traffic-overlay" id="trafficEmpty">Waiting for traffic samples…</div>
+          <div class="traffic-tooltip" id="trafficTooltip"></div>
+        </div>
+      </div>
+      <div class="traffic-log">
+        <div class="subtle" style="text-transform:uppercase; letter-spacing:.08em;">Traffic log</div>
+        <div class="log-list" id="trafficLog"></div>
+      </div>
+    </section>
+
   </div>
 
   <script>
@@ -253,13 +302,26 @@
       interval: 3000,
       timer: null,
       pingTimer: null,
-      sort: { key: 'name', dir: 'asc' }
+      sort: { key: 'name', dir: 'asc' },
+      pingMetrics: { latency: true, loss: true },
+      traffic: {
+        windowMs: 180000,
+        samples: [],
+        metrics: { tunnel: true, interfaces: {} },
+        colors: {}
+      },
+      trafficLog: []
     };
 
     const qs = (id) => document.getElementById(id);
     const pingCanvas = qs('pingChart');
     const pingEmpty = qs('pingEmpty');
     const pingTooltip = qs('pingTooltip');
+    const trafficCanvas = qs('trafficChart');
+    const trafficEmpty = qs('trafficEmpty');
+    const trafficTooltip = qs('trafficTooltip');
+    const trafficMetrics = qs('trafficMetrics');
+    const trafficLog = qs('trafficLog');
     const themeToggle = qs('themeToggle');
     const storedTheme = localStorage.getItem('engardeTheme');
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -296,7 +358,9 @@
       try {
         const data = DEMO_MODE ? demoPayload() : await apiFetch('/api/v1/get-list');
         state.data = data;
+        updateTrafficSamples(data);
         render();
+        renderTraffic();
       } catch (err) {
         console.warn('API error:', err.message);
       }
@@ -322,6 +386,7 @@
         wgMtu: 1420,
         interfaces: [
           { name: 'eth0', status: 'active', senderAddress: '192.168.1.42', dstAddress: '10.0.0.1:51820', last: 2, trafficBps: 142342 },
+          { name: 'usb0', status: 'active', senderAddress: '192.168.8.10', dstAddress: '10.0.0.1:51820', last: 4, trafficBps: 62344 },
           { name: 'wlan0', status: 'idle', senderAddress: '192.168.1.101', dstAddress: '10.0.0.1:51820', last: 45 },
           { name: 'wg0', status: 'excluded', senderAddress: '10.14.0.2', dstAddress: '10.0.0.1:51820', last: null }
         ]
@@ -482,6 +547,192 @@
       renderInterfaceBoxes(list);
     }
 
+    function updateTrafficSamples(data) {
+      const now = Date.now();
+      const interfaces = data.interfaces || [];
+      const ifaceSpeeds = {};
+      interfaces.forEach((iface) => {
+        if (typeof iface.trafficBps === 'number') {
+          ifaceSpeeds[iface.name] = iface.trafficBps;
+          if (state.traffic.metrics.interfaces[iface.name] === undefined) {
+            state.traffic.metrics.interfaces[iface.name] = true;
+          }
+        }
+      });
+      const tunnelBps = Object.values(ifaceSpeeds).reduce((sum, value) => sum + value, 0);
+      state.traffic.samples.push({ timestamp: now, tunnelBps, interfaces: ifaceSpeeds });
+      const cutoff = now - state.traffic.windowMs;
+      while (state.traffic.samples.length && state.traffic.samples[0].timestamp < cutoff) {
+        state.traffic.samples.shift();
+      }
+      state.trafficLog.push({ timestamp: now, tunnelBps, interfaces: ifaceSpeeds });
+      if (state.trafficLog.length > 25) {
+        state.trafficLog.shift();
+      }
+    }
+
+    function renderTraffic() {
+      renderTrafficMetrics();
+      drawTrafficChart(state.traffic.samples);
+      renderTrafficLog();
+    }
+
+    function renderTrafficMetrics() {
+      if (!trafficMetrics) return;
+      const interfaceNames = Object.keys(state.traffic.metrics.interfaces).sort();
+      const rows = [];
+      rows.push(metricToggle('tunnel', 'Tunnel total', getSeriesColor('tunnel'), state.traffic.metrics.tunnel));
+      interfaceNames.forEach((name) => {
+        rows.push(metricToggle(`iface:${name}`, name, getSeriesColor(name), state.traffic.metrics.interfaces[name]));
+      });
+      trafficMetrics.innerHTML = rows.join('');
+      trafficMetrics.querySelectorAll('input[type="checkbox"]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const id = input.dataset.metric;
+          if (id === 'tunnel') {
+            state.traffic.metrics.tunnel = input.checked;
+          } else if (id.startsWith('iface:')) {
+            const name = id.replace('iface:', '');
+            state.traffic.metrics.interfaces[name] = input.checked;
+          }
+          drawTrafficChart(state.traffic.samples);
+        });
+      });
+    }
+
+    function metricToggle(metric, label, color, checked) {
+      return `
+        <label class="metric-toggle">
+          <input type="checkbox" data-metric="${metric}" ${checked ? 'checked' : ''}>
+          <span class="metric-swatch" style="--swatch: ${color};"></span>
+          ${label}
+        </label>
+      `;
+    }
+
+    function getSeriesColor(key) {
+      if (state.traffic.colors[key]) return state.traffic.colors[key];
+      const palette = ['#7ae0ff', '#7bd88f', '#ffb86c', '#ff6b6b', '#9f7aea', '#4fd1c5', '#f6ad55'];
+      const index = Object.keys(state.traffic.colors).length % palette.length;
+      const color = key === 'tunnel' ? 'rgba(122,224,255,0.9)' : palette[index];
+      state.traffic.colors[key] = color;
+      return color;
+    }
+
+    function drawTrafficChart(samples) {
+      const canvas = trafficCanvas;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const rect = canvas.getBoundingClientRect();
+      const ratio = window.devicePixelRatio || 1;
+      canvas.width = rect.width * ratio;
+      canvas.height = rect.height * ratio;
+      ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+
+      if (!samples.length) {
+        trafficEmpty.style.display = 'flex';
+        trafficEmpty.textContent = 'Waiting for traffic samples…';
+        trafficTooltip.style.opacity = 0;
+        return;
+      }
+
+      const series = [];
+      if (state.traffic.metrics.tunnel) {
+        series.push({ key: 'tunnel', label: 'Tunnel total', color: getSeriesColor('tunnel'), values: samples.map(s => s.tunnelBps) });
+      }
+      Object.entries(state.traffic.metrics.interfaces).forEach(([name, enabled]) => {
+        if (!enabled) return;
+        series.push({
+          key: name,
+          label: name,
+          color: getSeriesColor(name),
+          values: samples.map(s => s.interfaces[name] ?? null)
+        });
+      });
+
+      if (!series.length) {
+        trafficEmpty.style.display = 'flex';
+        trafficEmpty.textContent = 'No metrics selected';
+        trafficTooltip.style.opacity = 0;
+        return;
+      }
+
+      const values = series.flatMap(s => s.values.filter(v => v !== null && v !== undefined));
+      if (!values.length) {
+        trafficEmpty.style.display = 'flex';
+        trafficEmpty.textContent = 'No traffic data yet';
+        trafficTooltip.style.opacity = 0;
+        return;
+      }
+
+      trafficEmpty.style.display = 'none';
+      trafficTooltip.style.opacity = 0;
+
+      const padding = 16;
+      const width = rect.width - padding * 2;
+      const height = rect.height - padding * 2;
+      const max = Math.max(...values);
+      const min = 0;
+      const range = max - min || 1;
+      const step = width / Math.max(samples.length - 1, 1);
+      const yFor = (value) => padding + (max - value) / range * height;
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 4; i++) {
+        const y = padding + (height / 4) * i;
+        ctx.beginPath();
+        ctx.moveTo(padding, y);
+        ctx.lineTo(padding + width, y);
+        ctx.stroke();
+      }
+
+      series.forEach((serie) => {
+        ctx.strokeStyle = serie.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        serie.values.forEach((value, idx) => {
+          if (value === null || value === undefined) {
+            started = false;
+            return;
+          }
+          const x = padding + step * idx;
+          const y = yFor(value);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
+        ctx.stroke();
+      });
+    }
+
+    function renderTrafficLog() {
+      if (!trafficLog) return;
+      trafficLog.innerHTML = '';
+      if (!state.trafficLog.length) {
+        trafficLog.innerHTML = '<div class="subtle" style="text-align:center;">No traffic samples yet</div>';
+        return;
+      }
+      const entries = state.trafficLog.slice(-12).reverse();
+      entries.forEach((entry) => {
+        const row = document.createElement('div');
+        row.className = 'log-entry';
+        const interfaces = Object.entries(entry.interfaces || {})
+          .map(([name, speed]) => `<span class="log-chip">${name}: ${formatTraffic(speed)}</span>`)
+          .join(' ');
+        row.innerHTML = `
+          <div class="log-time">${formatTimestamp(entry.timestamp)}</div>
+          <div class="log-line"><span class="log-chip">Tunnel: ${formatTraffic(entry.tunnelBps)}</span>${interfaces ? ` ${interfaces}` : ''}</div>
+        `;
+        trafficLog.appendChild(row);
+      });
+    }
+
     function renderPing() {
       if (!state.ping) return;
       const data = state.ping;
@@ -518,9 +769,16 @@
       }
 
       const values = samples.filter(v => v !== null && v !== undefined);
-      if (!values.length) {
+      if (!values.length && state.pingMetrics.latency) {
         pingEmpty.style.display = 'flex';
         pingEmpty.textContent = 'No replies yet';
+        pingTooltip.style.opacity = 0;
+        return;
+      }
+
+      if (!state.pingMetrics.latency && !state.pingMetrics.loss) {
+        pingEmpty.style.display = 'flex';
+        pingEmpty.textContent = 'No metrics selected';
         pingTooltip.style.opacity = 0;
         return;
       }
@@ -531,8 +789,9 @@
       const padding = 16;
       const width = rect.width - padding * 2;
       const height = rect.height - padding * 2;
-      const max = Math.max(...values);
-      const min = Math.min(...values);
+      const safeValues = values.length ? values : [0];
+      const max = Math.max(...safeValues);
+      const min = Math.min(...safeValues);
       const range = max - min || 1;
       const step = width / Math.max(samples.length - 1, 1);
       const yFor = (value) => padding + (max - value) / range * height;
@@ -547,39 +806,43 @@
         ctx.stroke();
       }
 
-      const gradient = ctx.createLinearGradient(0, padding, 0, padding + height);
-      gradient.addColorStop(0, 'rgba(122,224,255,0.85)');
-      gradient.addColorStop(1, 'rgba(122,224,255,0.12)');
-      ctx.strokeStyle = gradient;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      let started = false;
-      samples.forEach((value, idx) => {
-        if (value === null || value === undefined) {
-          started = false;
-          return;
-        }
-        const x = padding + step * idx;
-        const y = yFor(value);
-        if (!started) {
-          ctx.moveTo(x, y);
-          started = true;
-        } else {
-          ctx.lineTo(x, y);
-        }
-      });
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(255,107,107,0.7)';
-      ctx.lineWidth = 1;
-      samples.forEach((value, idx) => {
-        if (value !== null && value !== undefined) return;
-        const x = padding + step * idx;
+      if (state.pingMetrics.latency) {
+        const gradient = ctx.createLinearGradient(0, padding, 0, padding + height);
+        gradient.addColorStop(0, 'rgba(122,224,255,0.85)');
+        gradient.addColorStop(1, 'rgba(122,224,255,0.12)');
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(x, padding);
-        ctx.lineTo(x, padding + height);
+        let started = false;
+        samples.forEach((value, idx) => {
+          if (value === null || value === undefined) {
+            started = false;
+            return;
+          }
+          const x = padding + step * idx;
+          const y = yFor(value);
+          if (!started) {
+            ctx.moveTo(x, y);
+            started = true;
+          } else {
+            ctx.lineTo(x, y);
+          }
+        });
         ctx.stroke();
-      });
+      }
+
+      if (state.pingMetrics.loss) {
+        ctx.strokeStyle = 'rgba(255,107,107,0.7)';
+        ctx.lineWidth = 1;
+        samples.forEach((value, idx) => {
+          if (value !== null && value !== undefined) return;
+          const x = padding + step * idx;
+          ctx.beginPath();
+          ctx.moveTo(x, padding);
+          ctx.lineTo(x, padding + height);
+          ctx.stroke();
+        });
+      }
     }
 
     function formatTimestamp(timestampMs) {
@@ -593,7 +856,7 @@
         pingTooltip.style.opacity = 0;
       });
       pingCanvas.addEventListener('mousemove', (event) => {
-        if (!state.ping || !state.ping.samples?.length) return;
+        if (!state.ping || !state.ping.samples?.length || !state.pingMetrics.latency) return;
         const rect = pingCanvas.getBoundingClientRect();
         const padding = 16;
         const width = rect.width - padding * 2;
@@ -611,6 +874,39 @@
         pingTooltip.style.left = `${padding + idx * step}px`;
         pingTooltip.style.top = `${padding}px`;
         pingTooltip.style.opacity = 1;
+      });
+    }
+
+    function bindTrafficTooltip() {
+      if (!trafficCanvas) return;
+      trafficCanvas.addEventListener('mouseleave', () => {
+        trafficTooltip.style.opacity = 0;
+      });
+      trafficCanvas.addEventListener('mousemove', (event) => {
+        if (!state.traffic.samples?.length) return;
+        const rect = trafficCanvas.getBoundingClientRect();
+        const padding = 16;
+        const width = rect.width - padding * 2;
+        const x = Math.min(Math.max(event.clientX - rect.left - padding, 0), width);
+        const step = width / Math.max(state.traffic.samples.length - 1, 1);
+        const idx = Math.round(x / step);
+        const sample = state.traffic.samples[idx];
+        if (!sample) return;
+        const items = [];
+        if (state.traffic.metrics.tunnel) {
+          items.push(`Tunnel: ${formatTraffic(sample.tunnelBps)}`);
+        }
+        Object.entries(state.traffic.metrics.interfaces).forEach(([name, enabled]) => {
+          if (!enabled) return;
+          const speed = sample.interfaces[name];
+          if (speed === undefined) return;
+          items.push(`${name}: ${formatTraffic(speed)}`);
+        });
+        const labelTime = formatTimestamp(sample.timestamp);
+        trafficTooltip.textContent = `${labelTime} • ${items.join(' • ') || 'No data'}`;
+        trafficTooltip.style.left = `${padding + idx * step}px`;
+        trafficTooltip.style.top = `${padding}px`;
+        trafficTooltip.style.opacity = 1;
       });
     }
 
@@ -660,8 +956,19 @@
     schedulePingRefresh();
     window.addEventListener('resize', () => {
       if (state.ping?.samples) drawPingChart(state.ping.samples);
+      if (state.traffic?.samples) drawTrafficChart(state.traffic.samples);
     });
+    const pingMetricsPanel = qs('pingMetricsPanel');
+    if (pingMetricsPanel) {
+      pingMetricsPanel.querySelectorAll('input[data-metric]').forEach((input) => {
+        input.addEventListener('change', () => {
+          state.pingMetrics[input.dataset.metric] = input.checked;
+          drawPingChart(state.ping?.samples || []);
+        });
+      });
+    }
     bindPingTooltip();
+    bindTrafficTooltip();
   </script>
 </body>
 </html>
